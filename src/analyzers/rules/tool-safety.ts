@@ -784,4 +784,729 @@ export const toolSafetyRules: Rule[] = [
       return findings;
     },
   },
+  {
+    id: 'AA-TS-021',
+    name: 'Tool with unrestricted network access',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Tool has network capabilities but no URL filtering or domain allowlist.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:requests\.(?:get|post|put|delete)|fetch|urllib|httpx\.(?:get|post)|aiohttp)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 500));
+          if (!/allowlist|whitelist|allowed_url|allowed_domain|url_filter|domain_check/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-021-${findings.length}`, ruleId: 'AA-TS-021',
+              title: 'Tool with unrestricted network access',
+              description: `Network call in tool code in ${file.relativePath} has no URL filtering or allowlist.`,
+              severity: 'high', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Add URL allowlisting to restrict network access to approved domains only.',
+              standards: { owaspAgentic: ['ASI02'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-022',
+    name: 'Tool without timeout',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Tool function makes external calls without configuring a timeout.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:requests\.(?:get|post|put|delete)|fetch|httpx\.(?:get|post)|urllib\.request\.urlopen)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(match.index, Math.min(content.length, match.index + 300));
+          if (!/timeout/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-022-${findings.length}`, ruleId: 'AA-TS-022',
+              title: 'Tool without timeout',
+              description: `External call in tool code in ${file.relativePath} lacks a timeout parameter.`,
+              severity: 'high', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Add timeout parameter to all external calls in tools (e.g., timeout=30).',
+              standards: { owaspAgentic: ['ASI02'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-023',
+    name: 'Tool output not size-limited',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'low',
+    description: 'Tool returns unbounded data without size limits, risking context overflow.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool)/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /return\s+(?:response\.text|response\.json\(\)|result|data|output)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 200));
+          if (!/truncat|limit|max_len|[:]\s*\d+|slice|substring|\.head/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-023-${findings.length}`, ruleId: 'AA-TS-023',
+              title: 'Tool output not size-limited',
+              description: `Tool in ${file.relativePath} returns data without apparent size limits.`,
+              severity: 'high', confidence: 'low', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Truncate or limit tool output size to prevent context window overflow.',
+              standards: { owaspAgentic: ['ASI02'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-024',
+    name: 'Tool with write to shared state',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Tool modifies global or shared state, risking unintended side effects.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:global\s+\w+|globals\(\)|shared_state|app\.state|os\.environ)\s*[\[=]/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-TS-024-${findings.length}`, ruleId: 'AA-TS-024',
+            title: 'Tool with write to shared state',
+            description: `Tool code in ${file.relativePath} modifies global or shared state.`,
+            severity: 'high', confidence: 'medium', domain: 'tool-safety',
+            location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+            remediation: 'Avoid modifying global state from tools. Use return values and let the agent framework manage state.',
+            standards: { owaspAgentic: ['ASI02'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-025',
+    name: 'Tool can invoke other tools (chaining)',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Tool invokes other tools directly, enabling uncontrolled tool chaining.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool)/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:tool\.run|tool\.invoke|tool\.execute|tools\[\w+\]\.run|\.run_tool\(|agent\.run)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-TS-025-${findings.length}`, ruleId: 'AA-TS-025',
+            title: 'Tool can invoke other tools (chaining)',
+            description: `Tool in ${file.relativePath} invokes other tools, enabling uncontrolled chaining.`,
+            severity: 'high', confidence: 'medium', domain: 'tool-safety',
+            location: { file: file.relativePath, line, snippet: match[0] },
+            remediation: 'Avoid tool-to-tool invocation. Let the agent framework control tool orchestration.',
+            standards: { owaspAgentic: ['ASI02'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-026',
+    name: 'Tool description mismatch with impl',
+    domain: 'tool-safety',
+    severity: 'medium',
+    confidence: 'low',
+    description: 'Tool description does not match its actual capabilities, misleading the LLM.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const tool of graph.tools) {
+        const desc = tool.description.toLowerCase();
+        const caps = tool.capabilities;
+        // Check if capabilities suggest actions not mentioned in description
+        if (caps.includes('shell') && !/shell|command|exec/i.test(desc)) {
+          findings.push({
+            id: `AA-TS-026-${findings.length}`, ruleId: 'AA-TS-026',
+            title: 'Tool description mismatch with impl',
+            description: `Tool "${tool.name}" in ${tool.file} has shell capability but description doesn't mention it.`,
+            severity: 'medium', confidence: 'low', domain: 'tool-safety',
+            location: { file: tool.file, line: tool.line },
+            remediation: 'Update tool descriptions to accurately reflect all capabilities, especially dangerous ones.',
+            standards: { owaspAgentic: ['ASI02'] },
+          });
+        }
+        if (caps.includes('database') && !/database|sql|db|query/i.test(desc)) {
+          findings.push({
+            id: `AA-TS-026-${findings.length}`, ruleId: 'AA-TS-026',
+            title: 'Tool description mismatch with impl',
+            description: `Tool "${tool.name}" in ${tool.file} has database capability but description doesn't mention it.`,
+            severity: 'medium', confidence: 'low', domain: 'tool-safety',
+            location: { file: tool.file, line: tool.line },
+            remediation: 'Update tool descriptions to accurately reflect all capabilities.',
+            standards: { owaspAgentic: ['ASI02'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-027',
+    name: 'Tool with no rate limiting',
+    domain: 'tool-safety',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Tool lacks rate limiting, allowing potential abuse through rapid invocations.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const hasExternalCall = /(?:requests\.|fetch|httpx\.|subprocess|send_email|execute_query)/i.test(content);
+        if (hasExternalCall && !/rate.?limit|throttle|RateLimiter|@ratelimit|slowapi|limiter/i.test(content)) {
+          findings.push({
+            id: `AA-TS-027-${findings.length}`, ruleId: 'AA-TS-027',
+            title: 'Tool with no rate limiting',
+            description: `Tool code in ${file.relativePath} makes external calls without rate limiting.`,
+            severity: 'medium', confidence: 'medium', domain: 'tool-safety',
+            location: { file: file.relativePath, line: 1 },
+            remediation: 'Add rate limiting to tools that make external calls (e.g., @ratelimit decorator, throttle middleware).',
+            standards: { owaspAgentic: ['ASI02'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-028',
+    name: 'Tool params without type validation',
+    domain: 'tool-safety',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Tool parameters lack type annotations or validation schemas.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of graph.files.python) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /@tool\s*\n\s*def\s+(\w+)\s*\(([^)]*)\)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const params = match[2];
+          if (params && params.trim() && !params.includes(':')) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-028-${findings.length}`, ruleId: 'AA-TS-028',
+              title: 'Tool params without type validation',
+              description: `Tool "${match[1]}" in ${file.relativePath} has parameters without type annotations.`,
+              severity: 'medium', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 80) },
+              remediation: 'Add type annotations to all tool parameters (e.g., def my_tool(query: str, limit: int)).',
+              standards: { owaspAgentic: ['ASI02'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-029',
+    name: 'Email tool without recipient filtering',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Email sending tool lacks recipient validation or allowlist filtering.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:send_email|smtp\.send|sendmail|send_mail|\.send\(\s*(?:to|recipient))/gi;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 500));
+          if (!/allowlist|whitelist|allowed_recipient|validate_recipient|approved_domain|recipient_filter/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-029-${findings.length}`, ruleId: 'AA-TS-029',
+              title: 'Email tool without recipient filtering',
+              description: `Email sending in ${file.relativePath} lacks recipient validation or allowlist.`,
+              severity: 'high', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Add recipient allowlisting or validation to prevent sending emails to unauthorized addresses.',
+              standards: { owaspAgentic: ['ASI02'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-030',
+    name: 'API tool without response validation',
+    domain: 'tool-safety',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'API-calling tool does not validate responses before processing them.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:response\s*=\s*(?:requests|httpx|fetch|axios)[\s\S]*?return\s+response)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(match.index, Math.min(content.length, match.index + match[0].length + 200));
+          if (!/validate|schema|assert|status_code|raise_for_status|\.ok\b/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-030-${findings.length}`, ruleId: 'AA-TS-030',
+              title: 'API tool without response validation',
+              description: `API call in tool in ${file.relativePath} returns response without validation.`,
+              severity: 'medium', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: 'response returned without validation' },
+              remediation: 'Validate API responses (check status code, validate schema) before returning from tools.',
+              standards: { owaspAgentic: ['ASI02'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-031',
+    name: 'File system tool without path restrictions',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'File read/write tool lacks allowed_paths or path restriction configuration.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:open\s*\(|readFile|writeFile|fs\.read|fs\.write|pathlib\.Path)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 500));
+          if (!/allowed_path|restrict_path|base_dir|safe_dir|allowlist|chroot|sandbox_dir/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-031-${findings.length}`, ruleId: 'AA-TS-031',
+              title: 'File system tool without path restrictions',
+              description: `File operation in tool code in ${file.relativePath} has no allowed_paths or path restriction.`,
+              severity: 'high', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Configure allowed_paths or base_dir restrictions on file system tools to prevent path traversal.',
+              standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-032',
+    name: 'Database tool without query limits',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'SQL/database tool lacks query timeout or row limit configuration.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:execute|query|cursor\.execute|\.raw\(|\.sql\(|sequelize\.query)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 500));
+          if (!/timeout|max_rows|row_limit|LIMIT\s+\d|statement_timeout|query_timeout|fetchmany/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-032-${findings.length}`, ruleId: 'AA-TS-032',
+              title: 'Database tool without query limits',
+              description: `Database query in tool code in ${file.relativePath} has no timeout or row limit.`,
+              severity: 'high', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Add query timeout and row limits (e.g., LIMIT clause, statement_timeout, max_rows) to database tools.',
+              standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-033',
+    name: 'HTTP tool follows redirects blindly',
+    domain: 'tool-safety',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'HTTP requests/fetch calls do not limit redirects, risking SSRF via redirect chains.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:requests\.(?:get|post|put|delete|patch)|httpx\.(?:get|post|put|delete)|fetch)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(match.index, Math.min(content.length, match.index + 400));
+          if (!/max_redirect|allow_redirects\s*=\s*False|redirect\s*[:=]\s*["'](?:manual|error)|follow\s*[:=]\s*(?:false|0)/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-033-${findings.length}`, ruleId: 'AA-TS-033',
+              title: 'HTTP tool follows redirects blindly',
+              description: `HTTP call in tool code in ${file.relativePath} does not limit or disable redirects.`,
+              severity: 'medium', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Set max_redirects or disable redirects (allow_redirects=False) and validate redirect targets.',
+              standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-034',
+    name: 'Tool output used as code input',
+    domain: 'tool-safety',
+    severity: 'critical',
+    confidence: 'high',
+    description: 'Tool result is passed to eval, exec, or Function constructor, enabling code injection.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:eval|exec|Function)\s*\(\s*(?:tool_output|tool_result|result|response\.text|output)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-TS-034-${findings.length}`, ruleId: 'AA-TS-034',
+            title: 'Tool output used as code input',
+            description: `Tool output passed to eval/exec/Function in ${file.relativePath}, enabling code injection.`,
+            severity: 'critical', confidence: 'high', domain: 'tool-safety',
+            location: { file: file.relativePath, line, snippet: match[0] },
+            remediation: 'Never pass tool outputs to eval/exec/Function. Parse structured data instead of executing it.',
+            standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-035',
+    name: 'Tool with admin/root privileges',
+    domain: 'tool-safety',
+    severity: 'critical',
+    confidence: 'medium',
+    description: 'Tool runs with elevated admin/root permissions, risking full system compromise.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:sudo\s|run_as_root|admin_mode|privilege[ds]?\s*=\s*True|setuid|seteuid|as_superuser|root_access)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-TS-035-${findings.length}`, ruleId: 'AA-TS-035',
+            title: 'Tool with admin/root privileges',
+            description: `Tool code in ${file.relativePath} uses elevated privileges (${match[0].trim()}).`,
+            severity: 'critical', confidence: 'medium', domain: 'tool-safety',
+            location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+            remediation: 'Run tools with least-privilege permissions. Never grant admin/root access to agent tools.',
+            standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-036',
+    name: 'Tool modifies agent state',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Tool can alter agent configuration, memory, or runtime state.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:agent\.(?:config|memory|state|system_prompt)|self\.agent\.|update_agent_config|modify_memory|set_system_prompt)\s*[=(]/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-TS-036-${findings.length}`, ruleId: 'AA-TS-036',
+            title: 'Tool modifies agent state',
+            description: `Tool code in ${file.relativePath} modifies agent configuration or memory state.`,
+            severity: 'high', confidence: 'medium', domain: 'tool-safety',
+            location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+            remediation: 'Tools should not modify agent state directly. Use immutable agent config and return values for state changes.',
+            standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-037',
+    name: 'Tool with undocumented side effects',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Tool description does not mention write, delete, or send operations that the tool performs.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const tool of graph.tools) {
+        if (!tool.hasSideEffects) continue;
+        const desc = tool.description.toLowerCase();
+        const hasSideEffectMention = /write|delete|send|create|update|modify|remove|post|put|patch|mutate/i.test(desc);
+        if (!hasSideEffectMention && desc.length > 0) {
+          findings.push({
+            id: `AA-TS-037-${findings.length}`, ruleId: 'AA-TS-037',
+            title: 'Tool with undocumented side effects',
+            description: `Tool "${tool.name}" in ${tool.file} has side effects but description does not mention writes/deletes/sends.`,
+            severity: 'high', confidence: 'medium', domain: 'tool-safety',
+            location: { file: tool.file, line: tool.line },
+            remediation: 'Update tool description to explicitly mention all side effects (write, delete, send, modify).',
+            standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-038',
+    name: 'Tool spawns subprocesses',
+    domain: 'tool-safety',
+    severity: 'high',
+    confidence: 'high',
+    description: 'Tool creates child processes, enabling arbitrary command execution.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:subprocess\.(?:Popen|run|call|check_output)|child_process\.(?:spawn|exec|fork)|os\.(?:system|popen|exec[lv]?p?e?))\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-TS-038-${findings.length}`, ruleId: 'AA-TS-038',
+            title: 'Tool spawns subprocesses',
+            description: `Tool code in ${file.relativePath} spawns a child process via ${match[0].replace(/\s*\($/, '')}.`,
+            severity: 'high', confidence: 'high', domain: 'tool-safety',
+            location: { file: file.relativePath, line, snippet: match[0] },
+            remediation: 'Avoid spawning subprocesses from tools. Use library APIs instead, or sandbox subprocess execution.',
+            standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-039',
+    name: 'Tool accesses environment variables',
+    domain: 'tool-safety',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Tool reads environment variables, which may contain secrets or sensitive configuration.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /(?:os\.environ|os\.getenv|process\.env)\s*[\[.]/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-TS-039-${findings.length}`, ruleId: 'AA-TS-039',
+            title: 'Tool accesses environment variables',
+            description: `Tool code in ${file.relativePath} reads environment variables which may contain secrets.`,
+            severity: 'medium', confidence: 'medium', domain: 'tool-safety',
+            location: { file: file.relativePath, line, snippet: match[0] },
+            remediation: 'Pass configuration explicitly to tools instead of reading env vars. Use a secrets manager for sensitive values.',
+            standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-TS-040',
+    name: 'Tool output not size-limited',
+    domain: 'tool-safety',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Tool results have no max_output_length or truncation, risking context window overflow.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI02'],
+    standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const toolContext = /(?:@tool|def\s+\w+_tool|StructuredTool|BaseTool|\.tool\()/;
+        if (!toolContext.test(content)) continue;
+        const pattern = /return\s+(?:str\(|json\.dumps\(|\.read\(\)|\.text|\.content|\.decode\(\))/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 300));
+          if (!/max_output|truncat|[:]\s*\d+\]|\.substring\(|\.slice\(|max_len|output_limit/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-TS-040-${findings.length}`, ruleId: 'AA-TS-040',
+              title: 'Tool output not size-limited',
+              description: `Tool in ${file.relativePath} returns data without output size limiting.`,
+              severity: 'medium', confidence: 'medium', domain: 'tool-safety',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Add max_output_length or truncation to tool results to prevent context window overflow.',
+              standards: { owaspAgentic: ['ASI02'], iso23894: ['R.3', 'R.5'], owaspAivss: ['AIVSS-TA'], a2asBasic: ['AUTHZ', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
 ];

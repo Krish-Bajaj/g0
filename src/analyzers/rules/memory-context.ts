@@ -481,4 +481,753 @@ export const memoryContextRules: Rule[] = [
       return findings;
     },
   },
+  {
+    id: 'AA-MP-009',
+    name: 'Unbounded conversation buffer',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'ConversationBufferMemory is used without k or max_token_limit, allowing unbounded memory growth and potential context window overflow.',
+    frameworks: ['langchain'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try {
+          content = fs.readFileSync(file.path, 'utf-8');
+        } catch {
+          continue;
+        }
+
+        // Match ConversationBufferMemory( but NOT ConversationBufferWindowMemory(
+        const bufferPattern = /ConversationBufferMemory\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = bufferPattern.exec(content)) !== null) {
+          // Skip if it's actually ConversationBufferWindowMemory
+          const preceding = content.substring(Math.max(0, match.index - 10), match.index);
+          if (/Window$/.test(preceding)) continue;
+
+          // Check the call region for k or max_token_limit
+          const callEnd = content.indexOf(')', match.index + match[0].length);
+          const callRegion = content.substring(match.index, callEnd !== -1 ? callEnd + 1 : match.index + 500);
+          if (!/\bk\s*=|max_token_limit\s*=/.test(callRegion)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-009-${findings.length}`,
+              ruleId: 'AA-MP-009',
+              title: 'Unbounded conversation buffer',
+              description: `ConversationBufferMemory in ${file.relativePath} has no k or max_token_limit, allowing unbounded growth.`,
+              severity: 'high',
+              confidence: 'medium',
+              domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Use ConversationBufferWindowMemory with k parameter, or set max_token_limit on the memory instance.',
+              standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-010',
+    name: 'Memory persistence without encryption',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Memory is saved to file or database without encryption, risking exposure of sensitive conversation data.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try {
+          content = fs.readFileSync(file.path, 'utf-8');
+        } catch {
+          continue;
+        }
+
+        // Detect save_context, save_memory, persist writing to file/sqlite
+        const persistPattern = /(?:save_context|save_memory|persist)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = persistPattern.exec(content)) !== null) {
+          const regionStart = Math.max(0, match.index - 500);
+          const regionEnd = Math.min(content.length, match.index + 500);
+          const region = content.substring(regionStart, regionEnd);
+
+          // Check if persisting to file or sqlite
+          const hasFileOrDb = /\.json|\.txt|\.db|\.sqlite|sqlite3|open\s*\(|write|file_path|db_path/i.test(region);
+          // Check for encryption patterns
+          const hasEncryption = /encrypt|cipher|crypto|fernet|aes|kms|gpg|sealed/i.test(region);
+
+          if (hasFileOrDb && !hasEncryption) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-010-${findings.length}`,
+              ruleId: 'AA-MP-010',
+              title: 'Memory persistence without encryption',
+              description: `Memory in ${file.relativePath} is persisted to file or database without encryption.`,
+              severity: 'high',
+              confidence: 'medium',
+              domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Encrypt memory data before persisting. Use Fernet, AES-256, or a KMS-backed encryption scheme.',
+              standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-011',
+    name: 'Vector store without namespace isolation',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Vector store is initialized without namespace or per-user collection isolation, risking cross-tenant data leakage.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try {
+          content = fs.readFileSync(file.path, 'utf-8');
+        } catch {
+          continue;
+        }
+
+        // Match vector store constructors: Chroma(, Pinecone(, FAISS(
+        const vectorPattern = /(?:Chroma|Pinecone|FAISS)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = vectorPattern.exec(content)) !== null) {
+          // Grab the call region
+          const callEnd = content.indexOf(')', match.index + match[0].length);
+          const regionEnd = Math.min(content.length, callEnd !== -1 ? callEnd + 1 : match.index + 500);
+          const callRegion = content.substring(match.index, regionEnd);
+
+          // Check for namespace isolation patterns
+          const hasNamespace = /namespace\s*=|tenant\s*=/.test(callRegion);
+          const hasUserCollection = /collection_name\s*=.*user|collection_name\s*=.*tenant|collection_name\s*=.*session/i.test(callRegion);
+
+          if (!hasNamespace && !hasUserCollection) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-011-${findings.length}`,
+              ruleId: 'AA-MP-011',
+              title: 'Vector store without namespace isolation',
+              description: `Vector store in ${file.relativePath} lacks namespace or per-user collection isolation.`,
+              severity: 'high',
+              confidence: 'medium',
+              domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Add namespace= or tenant= parameter, or use per-user collection names to isolate vector data.',
+              standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-012',
+    name: 'Memory shared between agents',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'A single memory instance is used across multiple agent constructors, risking cross-agent context leakage.',
+    frameworks: ['langchain', 'crewai'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try {
+          content = fs.readFileSync(file.path, 'utf-8');
+        } catch {
+          continue;
+        }
+
+        // Find memory variable assignments
+        const memAssignPattern = /(\w+)\s*=\s*(?:ConversationBufferMemory|ConversationBufferWindowMemory|ConversationSummaryMemory|ChatMessageHistory|InMemoryChatMessageHistory)\s*\(/g;
+        let assignMatch: RegExpExecArray | null;
+        while ((assignMatch = memAssignPattern.exec(content)) !== null) {
+          const memVarName = assignMatch[1];
+          // Count how many agent constructors reference this memory variable via memory= param
+          const agentMemPattern = new RegExp(
+            `(?:Agent|AgentExecutor|initialize_agent|CrewAgent|Crew)\\s*\\([^)]*memory\\s*=\\s*${memVarName}\\b`,
+            'g',
+          );
+          const agentUses: number[] = [];
+          let agentMatch: RegExpExecArray | null;
+          while ((agentMatch = agentMemPattern.exec(content)) !== null) {
+            const agentLine = content.substring(0, agentMatch.index).split('\n').length;
+            agentUses.push(agentLine);
+          }
+
+          if (agentUses.length > 1) {
+            const line = content.substring(0, assignMatch.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-012-${findings.length}`,
+              ruleId: 'AA-MP-012',
+              title: 'Memory shared between agents',
+              description: `Memory variable '${memVarName}' in ${file.relativePath} is used by ${agentUses.length} agent constructors.`,
+              severity: 'high',
+              confidence: 'medium',
+              domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: assignMatch[0].substring(0, 60) },
+              remediation: 'Create separate memory instances for each agent to prevent cross-agent context leakage.',
+              standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-013',
+    name: 'No memory cleanup on session end',
+    domain: 'memory-context',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Memory or session is used without clear/cleanup handlers, risking stale data persistence between sessions.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try {
+          content = fs.readFileSync(file.path, 'utf-8');
+        } catch {
+          continue;
+        }
+
+        // Check for memory usage
+        const memoryUsagePattern = /(?:ConversationBufferMemory|ConversationBufferWindowMemory|ConversationSummaryMemory|ChatMessageHistory|InMemoryChatMessageHistory)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = memoryUsagePattern.exec(content)) !== null) {
+          // Check entire file for cleanup patterns
+          const hasCleanup = /\.clear\s*\(|\.reset\s*\(|memory_cleanup|session_cleanup|on_session_end|atexit|signal\.signal|finally\s*:|__del__|on_disconnect|on_close/i.test(content);
+
+          if (!hasCleanup) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-013-${findings.length}`,
+              ruleId: 'AA-MP-013',
+              title: 'No memory cleanup on session end',
+              description: `Memory in ${file.relativePath} has no cleanup or clear handler for session termination.`,
+              severity: 'medium',
+              confidence: 'medium',
+              domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Add memory.clear() or cleanup handlers on session end, disconnect, or application shutdown.',
+              standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+            });
+            // Only report once per file
+            break;
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-014',
+    name: 'Memory includes raw tool outputs',
+    domain: 'memory-context',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Tool outputs are stored directly in memory without filtering, risking injection of untrusted data into conversation context.',
+    frameworks: ['langchain', 'crewai'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try {
+          content = fs.readFileSync(file.path, 'utf-8');
+        } catch {
+          continue;
+        }
+
+        // Detect return_direct=True (tool output goes straight to user/memory without agent filtering)
+        const returnDirectPattern = /return_direct\s*=\s*True/g;
+        let match: RegExpExecArray | null;
+        while ((match = returnDirectPattern.exec(content)) !== null) {
+          // Check surrounding context for memory usage
+          const hasMemoryContext = /memory|ConversationBuffer|ChatMessageHistory|save_context/i.test(content);
+          if (hasMemoryContext) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-014-${findings.length}`,
+              ruleId: 'AA-MP-014',
+              title: 'Memory includes raw tool outputs',
+              description: `Tool with return_direct=True in ${file.relativePath} sends unfiltered output to memory.`,
+              severity: 'medium',
+              confidence: 'medium',
+              domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Filter or sanitize tool outputs before storing in memory. Avoid return_direct=True with persistent memory.',
+              standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+            });
+          }
+        }
+
+        // Also detect memory.save_context with tool results directly
+        const saveToolPattern = /save_context\s*\([^)]*tool_output|save_context\s*\([^)]*result/g;
+        while ((match = saveToolPattern.exec(content)) !== null) {
+          const regionStart = Math.max(0, match.index - 300);
+          const region = content.substring(regionStart, match.index + match[0].length + 300);
+          const hasFiltering = /sanitize|filter|clean|strip|truncate|validate/i.test(region);
+
+          if (!hasFiltering) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-014-${findings.length}`,
+              ruleId: 'AA-MP-014',
+              title: 'Memory includes raw tool outputs',
+              description: `Tool output saved to memory without filtering in ${file.relativePath}.`,
+              severity: 'medium',
+              confidence: 'medium',
+              domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Filter or sanitize tool outputs before storing in memory. Remove sensitive data and limit output size.',
+              standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-015',
+    name: 'Memory search without relevance filtering',
+    domain: 'memory-context',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Vector similarity search is used without score_threshold or k limit, risking retrieval of irrelevant or poisoned context.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try {
+          content = fs.readFileSync(file.path, 'utf-8');
+        } catch {
+          continue;
+        }
+
+        // Match similarity_search( calls
+        const searchPattern = /similarity_search\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = searchPattern.exec(content)) !== null) {
+          // Grab the call region to check for parameters
+          const callEnd = content.indexOf(')', match.index + match[0].length);
+          const regionEnd = Math.min(content.length, callEnd !== -1 ? callEnd + 1 : match.index + 500);
+          const callRegion = content.substring(match.index, regionEnd);
+
+          const hasScoreThreshold = /score_threshold\s*=/.test(callRegion);
+          const hasKLimit = /\bk\s*=/.test(callRegion);
+
+          if (!hasScoreThreshold && !hasKLimit) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-015-${findings.length}`,
+              ruleId: 'AA-MP-015',
+              title: 'Memory search without relevance filtering',
+              description: `similarity_search in ${file.relativePath} has no score_threshold or k limit.`,
+              severity: 'medium',
+              confidence: 'medium',
+              domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Add score_threshold and/or k parameters to similarity_search to filter irrelevant results.',
+              standards: { owaspAgentic: ['ASI06'], aiuc1: ['F001'], iso42001: ['A.9.2'], nistAiRmf: ['MANAGE-3.1'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-016',
+    name: 'Context window near limit without truncation strategy',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'LLM context is built without a truncation or summarization strategy, risking overflow and lost instructions.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:messages\.append|add_message|chat_history\.add|messages\.push|messages\s*\+\s*=)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const hasStrategy = /truncat|summariz|trim_messages|max_history|window_size|ConversationSummaryMemory|token_count|count_tokens/i.test(content);
+          if (!hasStrategy) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-016-${findings.length}`, ruleId: 'AA-MP-016',
+              title: 'Context window near limit without truncation strategy',
+              description: `Messages are appended in ${file.relativePath} without a truncation or summarization strategy.`,
+              severity: 'high', confidence: 'medium', domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Implement a truncation strategy (sliding window, summarization, or token counting) to prevent context overflow.',
+              standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+            });
+            break; // One finding per file
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-017',
+    name: 'Memory poisoning via tool output',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Tool results are stored in memory without sanitization, enabling memory poisoning attacks.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:memory\.(?:save|add|store|put)|add_to_memory|save_context)\s*\([^)]*(?:tool_output|tool_result|\.output|\.result)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 300), Math.min(content.length, match.index + 300));
+          if (!/sanitiz|filter|clean|strip_tags|escape|validate_output/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-017-${findings.length}`, ruleId: 'AA-MP-017',
+              title: 'Memory poisoning via tool output',
+              description: `Tool output stored in memory without sanitization in ${file.relativePath}.`,
+              severity: 'high', confidence: 'medium', domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Sanitize and validate tool outputs before storing them in memory. Strip HTML, limit length, and filter control characters.',
+              standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-018',
+    name: 'No memory access audit log',
+    domain: 'memory-context',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Memory read/write operations are not logged for audit purposes.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const memoryPattern = /(?:ConversationBufferMemory|ChatMessageHistory|InMemoryChatMessageHistory|VectorStore|ChromaDB|Pinecone|FAISS)\s*\(/;
+        if (!memoryPattern.test(content)) continue;
+        const hasAuditLog = /audit|log_access|access_log|memory_log|logging\.info.*memory|logger\.info.*memory|log\.info.*memory/i.test(content);
+        if (!hasAuditLog) {
+          const match = content.match(memoryPattern);
+          const line = match ? content.substring(0, match.index!).split('\n').length : 1;
+          findings.push({
+            id: `AA-MP-018-${findings.length}`, ruleId: 'AA-MP-018',
+            title: 'No memory access audit log',
+            description: `Memory operations in ${file.relativePath} are not logged for audit purposes.`,
+            severity: 'medium', confidence: 'medium', domain: 'memory-context',
+            location: { file: file.relativePath, line, snippet: match ? match[0].substring(0, 60) : 'memory usage' },
+            remediation: 'Add audit logging for all memory read/write operations to enable forensic analysis.',
+            standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-019',
+    name: 'Stale memory not invalidated',
+    domain: 'memory-context',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Memory entries have no TTL or expiration mechanism, allowing stale data to persist.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const memoryStorePattern = /(?:memory_store|cache|dict|Map)\s*(?:=|\()/;
+        const memoryContextPattern = /(?:memory|conversation|chat_history|message_store)/i;
+        if (!memoryContextPattern.test(content) || !memoryStorePattern.test(content)) continue;
+        const hasTtl = /ttl|expire|max_age|retention|invalidat|evict|cleanup_interval|staleness/i.test(content);
+        if (!hasTtl) {
+          const match = content.match(memoryContextPattern);
+          const line = match ? content.substring(0, match.index!).split('\n').length : 1;
+          findings.push({
+            id: `AA-MP-019-${findings.length}`, ruleId: 'AA-MP-019',
+            title: 'Stale memory not invalidated',
+            description: `Memory store in ${file.relativePath} has no TTL or expiration to invalidate stale entries.`,
+            severity: 'medium', confidence: 'medium', domain: 'memory-context',
+            location: { file: file.relativePath, line },
+            remediation: 'Add TTL, expiration, or periodic cleanup to memory stores to prevent stale data accumulation.',
+            standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-020',
+    name: 'Memory replay attacks',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Memory entries lack nonce or timestamp, making them vulnerable to replay attacks.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:add_message|save_context|memory\.save|memory\.add|store_message)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 500));
+          if (!/nonce|timestamp|created_at|msg_id|message_id|uuid|sequence_number/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-020-${findings.length}`, ruleId: 'AA-MP-020',
+              title: 'Memory replay attacks',
+              description: `Memory entry in ${file.relativePath} has no nonce or timestamp to prevent replay attacks.`,
+              severity: 'high', confidence: 'medium', domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Add timestamps, nonces, or unique message IDs to memory entries to prevent replay attacks.',
+              standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+            });
+            break; // One finding per file
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-021',
+    name: 'RAG retrieval without relevance threshold',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Vector search returns results without a minimum relevance score, risking injection of irrelevant or poisoned content.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:similarity_search|vector_search|\.query|\.search|as_retriever)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(match.index, Math.min(content.length, match.index + 500));
+          if (!/score_threshold|min_score|relevance_threshold|min_relevance|distance_threshold/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-021-${findings.length}`, ruleId: 'AA-MP-021',
+              title: 'RAG retrieval without relevance threshold',
+              description: `Vector search in ${file.relativePath} has no relevance score threshold.`,
+              severity: 'high', confidence: 'medium', domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Set score_threshold or min_relevance on vector searches to filter out irrelevant results.',
+              standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-022',
+    name: 'Embedding injection in vector store',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'User input is directly embedded into vector store without filtering, enabling embedding injection attacks.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:add_texts|add_documents|from_texts|upsert|embed_documents)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 500));
+          const hasUserInput = /user_input|request\.|user_text|query|user_message|input_text/i.test(region);
+          const hasFiltering = /sanitiz|filter|clean|validate|strip|escape|moderate/i.test(region);
+          if (hasUserInput && !hasFiltering) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-022-${findings.length}`, ruleId: 'AA-MP-022',
+              title: 'Embedding injection in vector store',
+              description: `User input embedded into vector store without filtering in ${file.relativePath}.`,
+              severity: 'high', confidence: 'medium', domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Sanitize and validate user input before embedding into vector stores. Apply content moderation.',
+              standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-023',
+    name: 'Memory serialization without integrity check',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Memory is serialized via pickle or JSON without HMAC or integrity verification.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const memoryContext = /memory|conversation|chat_history|message_store/i;
+        if (!memoryContext.test(content)) continue;
+        const pattern = /(?:pickle\.(?:dump|dumps|load|loads)|json\.(?:dump|dumps|load|loads)|serialize|deserialize)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 500), Math.min(content.length, match.index + 500));
+          if (!/hmac|integrity|signature|sign|verify|hash_check|checksum|mac\b/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-023-${findings.length}`, ruleId: 'AA-MP-023',
+              title: 'Memory serialization without integrity check',
+              description: `Memory serialization in ${file.relativePath} via ${match[0].replace(/\s*\($/, '')} lacks HMAC or integrity verification.`,
+              severity: 'high', confidence: 'medium', domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Add HMAC or digital signature verification to serialized memory data to prevent tampering.',
+              standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-024',
+    name: 'Cross-conversation memory bleed',
+    domain: 'memory-context',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Shared memory instance across conversations allows data leakage between different user sessions.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:shared_memory|global_memory|app\.state\.memory|singleton.*memory|_instance.*memory)/gi;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 300), Math.min(content.length, match.index + 300));
+          if (!/session_id|conversation_id|user_id|per_user|per_session|isolat/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-MP-024-${findings.length}`, ruleId: 'AA-MP-024',
+              title: 'Cross-conversation memory bleed',
+              description: `Shared memory in ${file.relativePath} may leak data across conversations.`,
+              severity: 'high', confidence: 'medium', domain: 'memory-context',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Isolate memory per conversation or session. Use conversation_id or session_id to scope memory access.',
+              standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-MP-025',
+    name: 'No memory quota per user',
+    domain: 'memory-context',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'No per-user memory quota or storage limits, allowing unbounded memory consumption.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI06'],
+    standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const memoryPattern = /(?:ConversationBufferMemory|ChatMessageHistory|InMemoryChatMessageHistory|Redis.*Memory|Postgres.*Memory)\s*\(/;
+        if (!memoryPattern.test(content)) continue;
+        const hasQuota = /quota|max_storage|storage_limit|max_messages|max_entries|per_user_limit|memory_limit|max_size/i.test(content);
+        if (!hasQuota) {
+          const match = content.match(memoryPattern);
+          const line = match ? content.substring(0, match.index!).split('\n').length : 1;
+          findings.push({
+            id: `AA-MP-025-${findings.length}`, ruleId: 'AA-MP-025',
+            title: 'No memory quota per user',
+            description: `Memory store in ${file.relativePath} has no per-user quota or storage limit.`,
+            severity: 'medium', confidence: 'medium', domain: 'memory-context',
+            location: { file: file.relativePath, line, snippet: match ? match[0].substring(0, 60) : 'memory store' },
+            remediation: 'Set per-user memory quotas (max_messages, max_storage) to prevent unbounded memory consumption.',
+            standards: { owaspAgentic: ['ASI06'], iso23894: ['R.2', 'R.5'], owaspAivss: ['AIVSS-DP'], a2asBasic: ['ISOL', 'AUDIT'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
 ];

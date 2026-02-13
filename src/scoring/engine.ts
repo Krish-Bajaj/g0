@@ -12,6 +12,9 @@ const ALL_DOMAINS: SecurityDomain[] = [
   'code-execution',
   'memory-context',
   'data-leakage',
+  'cascading-failures',
+  'human-oversight',
+  'inter-agent',
 ];
 
 export function calculateScore(findings: Finding[]): ScanScore {

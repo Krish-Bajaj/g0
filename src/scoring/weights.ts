@@ -8,6 +8,9 @@ export const DOMAIN_WEIGHTS: Record<SecurityDomain, number> = {
   'code-execution': 1.3,
   'memory-context': 1.1,
   'data-leakage': 1.3,
+  'cascading-failures': 1.2,
+  'human-oversight': 1.0,
+  'inter-agent': 1.1,
 };
 
 export const DOMAIN_LABELS: Record<SecurityDomain, string> = {
@@ -18,6 +21,9 @@ export const DOMAIN_LABELS: Record<SecurityDomain, string> = {
   'code-execution': 'Code Execution',
   'memory-context': 'Memory & Context',
   'data-leakage': 'Data Leakage',
+  'cascading-failures': 'Cascading Failures',
+  'human-oversight': 'Human Oversight',
+  'inter-agent': 'Inter-Agent',
 };
 
 export const SEVERITY_DEDUCTIONS = {

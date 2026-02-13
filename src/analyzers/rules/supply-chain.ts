@@ -541,6 +541,763 @@ export const supplyChainRules: Rule[] = [
       return findings;
     },
   },
+  {
+    id: 'AA-SC-011',
+    name: 'Slopsquatting risk in pip install',
+    domain: 'supply-chain',
+    severity: 'critical',
+    confidence: 'medium',
+    description: 'pip install command in code/scripts could be vulnerable to typosquatting/slopsquatting attacks.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript, ...graph.files.configs]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:pip|pip3)\s+install\s+(?!-r\s)([a-zA-Z0-9_-]+)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-SC-011-${findings.length}`, ruleId: 'AA-SC-011',
+            title: 'Slopsquatting risk in pip install',
+            description: `pip install in ${file.relativePath} installs "${match[1]}" directly, vulnerable to typosquatting.`,
+            severity: 'critical', confidence: 'medium', domain: 'supply-chain',
+            location: { file: file.relativePath, line, snippet: match[0].substring(0, 80) },
+            remediation: 'Use a requirements.txt with pinned versions and hash verification. Verify package names against PyPI.',
+            standards: { owaspAgentic: ['ASI04'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-012',
+    name: 'npm package with install scripts',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'high',
+    description: 'package.json contains preinstall/postinstall scripts that execute during npm install.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of graph.files.configs) {
+        const basename = file.relativePath.split('/').pop() ?? '';
+        if (basename !== 'package.json') continue;
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        let pkg: any;
+        try { pkg = JSON.parse(content); } catch { continue; }
+        const dangerousScripts = ['preinstall', 'postinstall', 'preuninstall', 'postuninstall'];
+        for (const script of dangerousScripts) {
+          if (pkg.scripts && pkg.scripts[script]) {
+            const line = findKeyLine(content, script);
+            findings.push({
+              id: `AA-SC-012-${findings.length}`, ruleId: 'AA-SC-012',
+              title: 'npm package with install scripts',
+              description: `package.json in ${file.relativePath} has "${script}" script: "${pkg.scripts[script]}".`,
+              severity: 'high', confidence: 'high', domain: 'supply-chain',
+              location: { file: file.relativePath, line, snippet: `"${script}": "${pkg.scripts[script]}"` },
+              remediation: 'Audit install scripts carefully. Use --ignore-scripts flag or remove unnecessary lifecycle scripts.',
+              standards: { owaspAgentic: ['ASI04'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-013',
+    name: 'Unpinned dependency version',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'high',
+    description: 'Dependency uses loose version specifiers (>=, *, latest) allowing untested versions.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of graph.files.configs) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const basename = file.relativePath.split('/').pop() ?? '';
+        if (basename === 'requirements.txt') {
+          const lines = content.split('\n');
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line || line.startsWith('#') || line.startsWith('-')) continue;
+            if (/>=|>\s*\d|~=/.test(line) && !line.includes('==')) {
+              findings.push({
+                id: `AA-SC-013-${findings.length}`, ruleId: 'AA-SC-013',
+                title: 'Unpinned dependency version',
+                description: `Dependency "${line}" in ${file.relativePath} uses a loose version specifier.`,
+                severity: 'high', confidence: 'high', domain: 'supply-chain',
+                location: { file: file.relativePath, line: i + 1, snippet: line },
+                remediation: 'Pin dependencies to exact versions (==) for reproducible builds.',
+                standards: { owaspAgentic: ['ASI04'] },
+              });
+            }
+          }
+        }
+        if (basename === 'package.json') {
+          let pkg: any;
+          try { pkg = JSON.parse(content); } catch { continue; }
+          const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+          for (const [name, version] of Object.entries(deps)) {
+            if (typeof version !== 'string') continue;
+            if (version === '*' || version === 'latest' || version.startsWith('>=')) {
+              const line = findKeyLine(content, name);
+              findings.push({
+                id: `AA-SC-013-${findings.length}`, ruleId: 'AA-SC-013',
+                title: 'Unpinned dependency version',
+                description: `Dependency "${name}" in ${file.relativePath} uses "${version}".`,
+                severity: 'high', confidence: 'high', domain: 'supply-chain',
+                location: { file: file.relativePath, line, snippet: `"${name}": "${version}"` },
+                remediation: 'Pin dependencies to exact versions for reproducible builds.',
+                standards: { owaspAgentic: ['ASI04'] },
+              });
+            }
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-014',
+    name: 'MCP server from unverified source',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'MCP server configuration points to an unknown or unverified source.',
+    frameworks: ['mcp'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.configs, ...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /["']command["']\s*:\s*["'](?:npx|uvx|node|python)["'][\s\S]*?["']args["']\s*:\s*\[([^\]]*)\]/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const args = match[1];
+          if (args && !/@modelcontextprotocol\/|@anthropic|@official/i.test(args)) {
+            const region = content.substring(Math.max(0, match.index - 200), match.index + match[0].length);
+            if (!/verified|trusted|official|audit/i.test(region)) {
+              const line = content.substring(0, match.index).split('\n').length;
+              findings.push({
+                id: `AA-SC-014-${findings.length}`, ruleId: 'AA-SC-014',
+                title: 'MCP server from unverified source',
+                description: `MCP server config in ${file.relativePath} points to an unverified package.`,
+                severity: 'high', confidence: 'medium', domain: 'supply-chain',
+                location: { file: file.relativePath, line, snippet: match[0].substring(0, 80) },
+                remediation: 'Use verified MCP servers from trusted sources. Audit third-party server code before use.',
+                standards: { owaspAgentic: ['ASI04'] },
+              });
+            }
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-015',
+    name: 'Docker image without digest',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'high',
+    description: 'Dockerfile uses an image without @sha256: digest, allowing mutable tags.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of graph.files.configs) {
+        const basename = file.relativePath.split('/').pop() ?? '';
+        if (!/^Dockerfile/i.test(basename)) continue;
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /^FROM\s+(\S+)/gm;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const image = match[1];
+          if (!image.includes('@sha256:') && image !== 'scratch') {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-SC-015-${findings.length}`, ruleId: 'AA-SC-015',
+              title: 'Docker image without digest',
+              description: `Dockerfile in ${file.relativePath} uses image "${image}" without @sha256: digest.`,
+              severity: 'high', confidence: 'high', domain: 'supply-chain',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Pin Docker images using @sha256: digests for reproducible and tamper-proof builds.',
+              standards: { owaspAgentic: ['ASI04'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-016',
+    name: 'Dynamic package install at runtime',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'high',
+    description: 'Code installs packages at runtime using pip install or npm install.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:subprocess|os\.system|exec|execSync|child_process)\s*[\.(].*(?:pip\s+install|npm\s+install|pip3\s+install)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-SC-016-${findings.length}`, ruleId: 'AA-SC-016',
+            title: 'Dynamic package install at runtime',
+            description: `Code in ${file.relativePath} installs packages at runtime, risking supply chain attacks.`,
+            severity: 'high', confidence: 'high', domain: 'supply-chain',
+            location: { file: file.relativePath, line, snippet: match[0].substring(0, 80) },
+            remediation: 'Install dependencies at build time, not runtime. Use a requirements file with pinned versions.',
+            standards: { owaspAgentic: ['ASI04'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-017',
+    name: 'No lockfile present',
+    domain: 'supply-chain',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Project lacks a lockfile (package-lock.json, yarn.lock, poetry.lock), making builds non-deterministic.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      const configNames = graph.files.configs.map(f => f.relativePath.split('/').pop() ?? '');
+      const hasManifest = configNames.includes('package.json') || configNames.includes('requirements.txt') || configNames.includes('pyproject.toml');
+      const hasLockfile = configNames.some(n => /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Pipfile\.lock|poetry\.lock|uv\.lock)$/.test(n));
+      if (hasManifest && !hasLockfile) {
+        findings.push({
+          id: 'AA-SC-017-0', ruleId: 'AA-SC-017',
+          title: 'No lockfile present',
+          description: 'Project has dependency manifests but no lockfile, making builds non-deterministic.',
+          severity: 'medium', confidence: 'medium', domain: 'supply-chain',
+          location: { file: graph.rootPath, line: 1 },
+          remediation: 'Generate a lockfile (npm install, yarn install, poetry lock) and commit it to version control.',
+          standards: { owaspAgentic: ['ASI04'] },
+        });
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-018',
+    name: 'Deprecated framework version',
+    domain: 'supply-chain',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Project uses a known deprecated version of an AI framework.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      const deprecated: Record<string, string> = {
+        'langchain==0.0': 'langchain 0.0.x is deprecated, upgrade to 0.1+',
+        'openai==0.2': 'openai 0.2x is deprecated, upgrade to 1.0+',
+        'crewai==0.1': 'crewai 0.1.x is deprecated, upgrade to latest',
+      };
+      for (const file of graph.files.configs) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        for (const [prefix, message] of Object.entries(deprecated)) {
+          if (content.includes(prefix)) {
+            const line = content.split('\n').findIndex(l => l.includes(prefix)) + 1;
+            findings.push({
+              id: `AA-SC-018-${findings.length}`, ruleId: 'AA-SC-018',
+              title: 'Deprecated framework version',
+              description: `${message} (found in ${file.relativePath}).`,
+              severity: 'medium', confidence: 'medium', domain: 'supply-chain',
+              location: { file: file.relativePath, line: line || 1, snippet: prefix },
+              remediation: 'Upgrade to the latest supported version of the framework.',
+              standards: { owaspAgentic: ['ASI04'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-019',
+    name: 'Importing from HTTP URL',
+    domain: 'supply-chain',
+    severity: 'medium',
+    confidence: 'high',
+    description: 'Code imports modules from an HTTP URL, risking man-in-the-middle attacks.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /import\s+.*from\s+["']http:\/\//g;
+        const pattern2 = /importlib\.import_module\s*\(\s*["']http/g;
+        for (const regex of [pattern, pattern2]) {
+          regex.lastIndex = 0;
+          let match: RegExpExecArray | null;
+          while ((match = regex.exec(content)) !== null) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-SC-019-${findings.length}`, ruleId: 'AA-SC-019',
+              title: 'Importing from HTTP URL',
+              description: `Code in ${file.relativePath} imports from an HTTP URL, risking MITM attacks.`,
+              severity: 'medium', confidence: 'high', domain: 'supply-chain',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 80) },
+              remediation: 'Use HTTPS URLs or install packages from a trusted registry instead of importing from URLs.',
+              standards: { owaspAgentic: ['ASI04'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-020',
+    name: 'No SBOM generation configured',
+    domain: 'supply-chain',
+    severity: 'medium',
+    confidence: 'low',
+    description: 'Project lacks SBOM (Software Bill of Materials) tooling for supply chain transparency.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      const allFiles = [...graph.files.configs, ...graph.files.python, ...graph.files.typescript, ...graph.files.javascript];
+      const hasSbom = allFiles.some(f => {
+        const name = f.relativePath.toLowerCase();
+        return /sbom|cyclonedx|spdx|syft|trivy/.test(name);
+      });
+      if (!hasSbom && allFiles.length > 0) {
+        let configContent = '';
+        for (const file of graph.files.configs) {
+          try { configContent += fs.readFileSync(file.path, 'utf-8'); } catch { /* ignore */ }
+        }
+        if (!/sbom|cyclonedx|spdx|syft|trivy/i.test(configContent)) {
+          findings.push({
+            id: 'AA-SC-020-0', ruleId: 'AA-SC-020',
+            title: 'No SBOM generation configured',
+            description: 'Project lacks SBOM generation tooling (CycloneDX, SPDX, Syft, Trivy).',
+            severity: 'medium', confidence: 'low', domain: 'supply-chain',
+            location: { file: graph.rootPath, line: 1 },
+            remediation: 'Add SBOM generation to your CI/CD pipeline using CycloneDX, SPDX, Syft, or Trivy.',
+            standards: { owaspAgentic: ['ASI04'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-021',
+    name: 'requirements.txt from untrusted source',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'requirements.txt is downloaded from an external URL, risking supply chain compromise.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript, ...graph.files.configs]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:curl|wget|requests\.get|fetch)\s*\(?.*requirements\.txt/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-SC-021-${findings.length}`, ruleId: 'AA-SC-021',
+            title: 'requirements.txt from untrusted source',
+            description: `Code in ${file.relativePath} downloads requirements.txt from a URL, risking supply chain compromise.`,
+            severity: 'high', confidence: 'medium', domain: 'supply-chain',
+            location: { file: file.relativePath, line, snippet: match[0].substring(0, 80) },
+            remediation: 'Vendor requirements.txt in the repository. Never download dependency lists from external sources at runtime.',
+            standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-022',
+    name: 'npm audit not in CI',
+    domain: 'supply-chain',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'No npm audit or yarn audit found in package.json scripts, missing vulnerability scanning in CI.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of graph.files.configs) {
+        const basename = file.relativePath.split('/').pop() ?? '';
+        if (basename !== 'package.json') continue;
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        let pkg: any;
+        try { pkg = JSON.parse(content); } catch { continue; }
+        const scripts = pkg.scripts ? Object.values(pkg.scripts).join(' ') : '';
+        if (!/npm\s+audit|yarn\s+audit|pnpm\s+audit|snyk\s+test|auditjs/i.test(scripts)) {
+          findings.push({
+            id: `AA-SC-022-${findings.length}`, ruleId: 'AA-SC-022',
+            title: 'npm audit not in CI',
+            description: `package.json in ${file.relativePath} has no audit command in scripts for vulnerability scanning.`,
+            severity: 'medium', confidence: 'medium', domain: 'supply-chain',
+            location: { file: file.relativePath, line: 1 },
+            remediation: 'Add "audit": "npm audit" or equivalent to package.json scripts and run it in CI.',
+            standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-023',
+    name: 'Known vulnerable dependency',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Dependencies with known CVEs detected based on version patterns.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      const knownVulnerable: Record<string, string> = {
+        'lodash==4.17.11': 'CVE-2019-10744 prototype pollution',
+        'requests==2.19': 'CVE-2018-18074 session cookie leak',
+        'axios==0.18': 'CVE-2019-10742 SSRF vulnerability',
+        'pyyaml==5.3': 'CVE-2020-14343 arbitrary code execution',
+        'urllib3==1.24': 'CVE-2019-11324 CRLF injection',
+      };
+      for (const file of graph.files.configs) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim().toLowerCase();
+          for (const [vuln, desc] of Object.entries(knownVulnerable)) {
+            if (line.startsWith(vuln.split('==')[0]) && line.includes(vuln.split('==')[1])) {
+              findings.push({
+                id: `AA-SC-023-${findings.length}`, ruleId: 'AA-SC-023',
+                title: 'Known vulnerable dependency',
+                description: `Dependency "${lines[i].trim()}" in ${file.relativePath} has known vulnerability: ${desc}.`,
+                severity: 'high', confidence: 'medium', domain: 'supply-chain',
+                location: { file: file.relativePath, line: i + 1, snippet: lines[i].trim() },
+                remediation: `Upgrade ${vuln.split('==')[0]} to a patched version to fix ${desc}.`,
+                standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+              });
+            }
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-024',
+    name: 'Git submodule from untrusted source',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Git submodule references an external repository that could be compromised.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of graph.files.configs) {
+        const basename = file.relativePath.split('/').pop() ?? '';
+        if (basename !== '.gitmodules') continue;
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /url\s*=\s*(.+)/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const url = match[1].trim();
+          const line = content.substring(0, match.index).split('\n').length;
+          findings.push({
+            id: `AA-SC-024-${findings.length}`, ruleId: 'AA-SC-024',
+            title: 'Git submodule from untrusted source',
+            description: `Git submodule in ${file.relativePath} references "${url}". Submodules can be hijacked.`,
+            severity: 'high', confidence: 'medium', domain: 'supply-chain',
+            location: { file: file.relativePath, line, snippet: match[0].substring(0, 80) },
+            remediation: 'Pin git submodules to specific commit hashes and audit the referenced repositories.',
+            standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-025',
+    name: 'Docker base image not pinned',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'high',
+    description: 'Dockerfile FROM directive uses a tag without sha256 digest, allowing mutable base images.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of graph.files.configs) {
+        const basename = file.relativePath.split('/').pop() ?? '';
+        if (!/^Dockerfile/i.test(basename) && basename !== 'docker-compose.yml' && basename !== 'docker-compose.yaml') continue;
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:^FROM|image:\s*)\s*(\S+)/gm;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const image = match[1];
+          if (!image.includes('@sha256:') && image !== 'scratch' && !/\$\{/.test(image)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-SC-025-${findings.length}`, ruleId: 'AA-SC-025',
+              title: 'Docker base image not pinned',
+              description: `Image "${image}" in ${file.relativePath} is not pinned with @sha256: digest.`,
+              severity: 'high', confidence: 'high', domain: 'supply-chain',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 80) },
+              remediation: 'Pin Docker base images using @sha256: digests (e.g., python:3.11@sha256:abc...).',
+              standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-026',
+    name: 'Terraform provider not pinned',
+    domain: 'supply-chain',
+    severity: 'medium',
+    confidence: 'high',
+    description: 'Terraform provider block lacks a version constraint, allowing untested provider versions.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of graph.files.configs) {
+        if (!file.relativePath.endsWith('.tf')) continue;
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /source\s*=\s*"([^"]+)"/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(match.index, Math.min(content.length, match.index + 300));
+          if (!/version\s*=/.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-SC-026-${findings.length}`, ruleId: 'AA-SC-026',
+              title: 'Terraform provider not pinned',
+              description: `Terraform provider "${match[1]}" in ${file.relativePath} has no version constraint.`,
+              severity: 'medium', confidence: 'high', domain: 'supply-chain',
+              location: { file: file.relativePath, line, snippet: match[0] },
+              remediation: 'Add version constraints to Terraform provider blocks (e.g., version = "~> 4.0").',
+              standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-027',
+    name: 'AI model download without checksum',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'AI model is loaded from a URL or hub without hash/checksum verification.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:from_pretrained|load_model|download_model|hf_hub_download|snapshot_download)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(match.index, Math.min(content.length, match.index + 500));
+          if (!/checksum|sha256|hash|verify_hash|revision\s*=\s*["'][a-f0-9]{40}/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-SC-027-${findings.length}`, ruleId: 'AA-SC-027',
+              title: 'AI model download without checksum',
+              description: `Model download in ${file.relativePath} via ${match[0].replace(/\s*\($/, '')} has no checksum verification.`,
+              severity: 'high', confidence: 'medium', domain: 'supply-chain',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Verify model integrity with sha256 checksums or pin to a specific revision hash.',
+              standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-028',
+    name: 'Plugin/extension not verified',
+    domain: 'supply-chain',
+    severity: 'high',
+    confidence: 'medium',
+    description: 'Plugin or extension is loaded without signature or integrity verification.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      for (const file of [...graph.files.python, ...graph.files.typescript, ...graph.files.javascript]) {
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        const pattern = /(?:load_plugin|register_plugin|import_plugin|load_extension|importlib\.import_module)\s*\(/g;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(content)) !== null) {
+          const region = content.substring(Math.max(0, match.index - 300), Math.min(content.length, match.index + 500));
+          if (!/verify|signature|sign|checksum|hash|trusted|allowlist|whitelist/i.test(region)) {
+            const line = content.substring(0, match.index).split('\n').length;
+            findings.push({
+              id: `AA-SC-028-${findings.length}`, ruleId: 'AA-SC-028',
+              title: 'Plugin/extension not verified',
+              description: `Plugin loading in ${file.relativePath} via ${match[0].replace(/\s*\($/, '')} has no signature or integrity check.`,
+              severity: 'high', confidence: 'medium', domain: 'supply-chain',
+              location: { file: file.relativePath, line, snippet: match[0].substring(0, 60) },
+              remediation: 'Verify plugin signatures or checksums before loading. Use an allowlist of trusted plugins.',
+              standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+            });
+          }
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-029',
+    name: 'Transitive dependency risk',
+    domain: 'supply-chain',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Deep dependency trees without a lockfile increase transitive dependency attack surface.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      const configNames = graph.files.configs.map(f => f.relativePath.split('/').pop() ?? '');
+      const hasLockfile = configNames.some(n => /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Pipfile\.lock|poetry\.lock|uv\.lock)$/.test(n));
+      if (hasLockfile) return findings;
+      for (const file of graph.files.configs) {
+        const basename = file.relativePath.split('/').pop() ?? '';
+        if (basename !== 'package.json' && basename !== 'requirements.txt') continue;
+        let content: string;
+        try { content = fs.readFileSync(file.path, 'utf-8'); } catch { continue; }
+        let depCount = 0;
+        if (basename === 'package.json') {
+          try {
+            const pkg = JSON.parse(content);
+            depCount = Object.keys(pkg.dependencies || {}).length + Object.keys(pkg.devDependencies || {}).length;
+          } catch { continue; }
+        } else {
+          depCount = content.split('\n').filter(l => l.trim() && !l.trim().startsWith('#') && !l.trim().startsWith('-')).length;
+        }
+        if (depCount > 10) {
+          findings.push({
+            id: `AA-SC-029-${findings.length}`, ruleId: 'AA-SC-029',
+            title: 'Transitive dependency risk',
+            description: `${file.relativePath} has ${depCount} dependencies without a lockfile, exposing transitive dependency risk.`,
+            severity: 'medium', confidence: 'medium', domain: 'supply-chain',
+            location: { file: file.relativePath, line: 1 },
+            remediation: 'Generate and commit a lockfile to pin transitive dependencies and reduce attack surface.',
+            standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
+  {
+    id: 'AA-SC-030',
+    name: 'Build artifact not signed',
+    domain: 'supply-chain',
+    severity: 'medium',
+    confidence: 'medium',
+    description: 'Build outputs lack signature verification, risking tampered artifact deployment.',
+    frameworks: ['all'],
+    owaspAgentic: ['ASI04'],
+    standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+    check: (graph: AgentGraph): Finding[] => {
+      const findings: Finding[] = [];
+      const allFiles = [...graph.files.configs, ...graph.files.python, ...graph.files.typescript, ...graph.files.javascript];
+      const hasSigning = allFiles.some(f => {
+        try {
+          const content = fs.readFileSync(f.path, 'utf-8');
+          return /cosign|sigstore|gpg\s+--sign|signcode|jarsigner|codesign|artifact.?sign|notary/i.test(content);
+        } catch { return false; }
+      });
+      if (!hasSigning && allFiles.length > 5) {
+        const hasBuild = allFiles.some(f => {
+          const name = f.relativePath.toLowerCase();
+          return /dockerfile|makefile|ci\.yml|ci\.yaml|build\.sh|jenkinsfile|\.github\/workflows/i.test(name);
+        });
+        if (hasBuild) {
+          findings.push({
+            id: 'AA-SC-030-0', ruleId: 'AA-SC-030',
+            title: 'Build artifact not signed',
+            description: 'Project has build configuration but no artifact signing (cosign, sigstore, GPG) detected.',
+            severity: 'medium', confidence: 'medium', domain: 'supply-chain',
+            location: { file: graph.rootPath, line: 1 },
+            remediation: 'Sign build artifacts using cosign, sigstore, or GPG to ensure integrity and provenance.',
+            standards: { owaspAgentic: ['ASI04'], iso23894: ['R.4', 'R.7'], owaspAivss: ['AIVSS-SC'], a2asBasic: ['AUTH', 'COMM'] },
+          });
+        }
+      }
+      return findings;
+    },
+  },
 ];
 
 function findKeyLine(content: string, key: string): number {

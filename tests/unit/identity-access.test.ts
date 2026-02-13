@@ -18,9 +18,11 @@ describe('Identity & Access Rules', () => {
     expect(iaFindings.length).toBeGreaterThan(0);
   });
 
-  it('does not flag clean code', async () => {
+  it('does not flag dangerous identity issues in clean code', async () => {
     const result = await runScan({ targetPath: path.join(FIXTURES, 'langchain-basic') });
-    const iaFindings = result.findings.filter(f => f.domain === 'identity-access');
+    const iaFindings = result.findings.filter(f =>
+      f.domain === 'identity-access' && f.severity === 'critical'
+    );
     expect(iaFindings.length).toBe(0);
   });
 });

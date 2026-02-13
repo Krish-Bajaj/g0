@@ -9,7 +9,41 @@ export interface AgentGraph {
   tools: ToolNode[];
   prompts: PromptNode[];
   configs: ConfigNode[];
+  models: ModelNode[];
+  vectorDBs: VectorDBNode[];
+  frameworkVersions: FrameworkInfo[];
+  interAgentLinks: InterAgentLink[];
   files: FileInventory;
+}
+
+export interface ErrorHandlingInfo {
+  hasTryCatch: boolean;
+  hasGlobalHandler: boolean;
+  hasToolErrorHandling: boolean;
+  hasCircuitBreaker: boolean;
+  hasRetryWithBackoff: boolean;
+  hasTimeout: boolean;
+}
+
+export interface RetryConfig {
+  hasMaxRetries: boolean;
+  hasBackoff: boolean;
+  maxRetryCount?: number;
+}
+
+export interface ResourceLimits {
+  hasTokenLimit: boolean;
+  hasToolCallLimit: boolean;
+  hasTimeoutLimit: boolean;
+  hasCostLimit: boolean;
+}
+
+export interface InterAgentLink {
+  fromAgent: string;
+  toAgent: string;
+  communicationType: 'direct' | 'message-queue' | 'shared-memory' | 'api' | 'delegation';
+  hasAuthentication: boolean;
+  hasEncryption: boolean;
 }
 
 export interface AgentNode {
@@ -20,9 +54,38 @@ export interface AgentNode {
   line: number;
   systemPrompt?: string;
   tools: string[];
+  modelId?: string;
+  delegationTargets?: string[];
   memoryType?: string;
   maxIterations?: number;
   delegationEnabled?: boolean;
+  errorHandling?: ErrorHandlingInfo;
+  retryConfig?: RetryConfig;
+  resourceLimits?: ResourceLimits;
+  isolationLevel?: 'none' | 'process' | 'container' | 'vm';
+}
+
+export interface ModelNode {
+  id: string;
+  name: string;
+  provider: string;
+  framework: FrameworkId;
+  file: string;
+  line: number;
+}
+
+export interface VectorDBNode {
+  id: string;
+  name: string;
+  framework: string;
+  file: string;
+  line: number;
+}
+
+export interface FrameworkInfo {
+  name: string;
+  version?: string;
+  file: string;
 }
 
 export interface ToolNode {

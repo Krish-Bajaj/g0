@@ -21,7 +21,10 @@ export type SecurityDomain =
   | 'supply-chain'
   | 'code-execution'
   | 'memory-context'
-  | 'data-leakage';
+  | 'data-leakage'
+  | 'cascading-failures'
+  | 'human-oversight'
+  | 'inter-agent';
 
 export type ReportFormat = 'terminal' | 'json' | 'html' | 'sarif';
 

@@ -18,6 +18,9 @@ export interface StandardsMapping {
   aiuc1?: string[];
   iso42001?: string[];
   nistAiRmf?: string[];
+  iso23894?: string[];
+  owaspAivss?: string[];
+  a2asBasic?: string[];
 }
 
 export interface FindingSummary {
