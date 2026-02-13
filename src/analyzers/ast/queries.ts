@@ -182,6 +182,33 @@ export function isInDangerousContext(tree: Tree, variableName: string): boolean 
   return false;
 }
 
+export function findAllStrings(tree: Tree | { rootNode: SyntaxNode }): SyntaxNode[] {
+  return findNodes(tree, (node) =>
+    node.type === 'string' ||
+    node.type === 'string_literal' ||
+    node.type === 'template_string' ||
+    node.type === 'concatenated_string',
+  );
+}
+
+export function findTryCatchBlocks(tree: Tree | { rootNode: SyntaxNode }): SyntaxNode[] {
+  return findNodes(tree, (node) =>
+    node.type === 'try_statement' ||
+    node.type === 'try_except_statement' ||   // Python
+    node.type === 'except_clause' ||
+    node.type === 'catch_clause',
+  );
+}
+
+export function findLoopConstructs(tree: Tree | { rootNode: SyntaxNode }): SyntaxNode[] {
+  return findNodes(tree, (node) =>
+    node.type === 'while_statement' ||
+    node.type === 'for_statement' ||
+    node.type === 'for_in_statement' ||
+    node.type === 'do_statement',
+  );
+}
+
 export function canDataFlow(
   tree: Tree,
   sourceVar: string,

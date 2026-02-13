@@ -54,6 +54,14 @@ export function findClassDefinitions(
   });
 }
 
+export function findExceptHandlers(tree: Tree): SyntaxNode[] {
+  return findNodes(tree, (node) => node.type === 'except_clause');
+}
+
+export function findWithStatements(tree: Tree): SyntaxNode[] {
+  return findNodes(tree, (node) => node.type === 'with_statement');
+}
+
 export function getKeywordArgBool(
   callNode: SyntaxNode,
   name: string,

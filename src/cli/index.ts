@@ -3,6 +3,10 @@ import { printBanner, getVersion } from './branding.js';
 import { scanCommand } from './commands/scan.js';
 import { initCommand } from './commands/init.js';
 import { gateCommand } from './commands/gate.js';
+import { inventoryCommand } from './commands/inventory.js';
+import { flowsCommand } from './commands/flows.js';
+import { mcpCommand } from './commands/mcp.js';
+import { testCommand } from './commands/test.js';
 
 export function createCli(): Command {
   const program = new Command();
@@ -15,12 +19,17 @@ export function createCli(): Command {
       const opts = actionCommand.opts();
       // Suppress banner for machine-readable outputs
       if (opts.json || opts.sarif || opts.quiet || opts.banner === false) return;
+      if (opts.markdown) return;
       printBanner();
     });
 
   program.addCommand(scanCommand);
   program.addCommand(initCommand);
   program.addCommand(gateCommand);
+  program.addCommand(inventoryCommand);
+  program.addCommand(flowsCommand);
+  program.addCommand(mcpCommand);
+  program.addCommand(testCommand);
 
   return program;
 }

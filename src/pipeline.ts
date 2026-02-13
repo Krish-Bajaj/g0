@@ -1,13 +1,16 @@
 import * as path from 'node:path';
-import type { ScanResult } from './types/score.js';
+import type { ScanResult, AIAnalysisResult } from './types/score.js';
 import type { G0Config } from './types/config.js';
-import type { Severity } from './types/common.js';
+import type { Severity, FileInventory } from './types/common.js';
+import type { AgentGraph } from './types/agent-graph.js';
 import { walkDirectory } from './discovery/walker.js';
-import { detectFrameworks } from './discovery/detector.js';
+import { detectFrameworks, type DetectionSummary } from './discovery/detector.js';
 import { buildAgentGraph } from './discovery/graph.js';
 import { runAnalysis } from './analyzers/engine.js';
 import { calculateScore } from './scoring/engine.js';
 import { clearASTCache } from './analyzers/ast/index.js';
+import { extractFrameworkVersions } from './analyzers/parsers/versions.js';
+import { detectVectorDBs } from './analyzers/parsers/vectordb.js';
 
 export interface ScanOptions {
   targetPath: string;
@@ -16,6 +19,41 @@ export interface ScanOptions {
   rules?: string[];
   excludeRules?: string[];
   frameworks?: string[];
+  aiAnalysis?: boolean;
+}
+
+export interface DiscoveryResult {
+  files: FileInventory;
+  detection: DetectionSummary;
+}
+
+/**
+ * Step 1+2: Discover files and detect frameworks.
+ */
+export async function runDiscovery(
+  rootPath: string,
+  excludePaths?: string[],
+): Promise<DiscoveryResult> {
+  clearASTCache();
+  const files = await walkDirectory(rootPath, excludePaths ?? []);
+  const detection = detectFrameworks(files);
+  return { files, detection };
+}
+
+/**
+ * Step 3: Build the agent graph from discovered files.
+ */
+export function runGraphBuild(
+  rootPath: string,
+  discovery: DiscoveryResult,
+): AgentGraph {
+  const graph = buildAgentGraph(rootPath, discovery.files, discovery.detection);
+
+  // Enrich with framework versions and vector DB detection
+  graph.frameworkVersions = extractFrameworkVersions(discovery.files);
+  detectVectorDBs(graph, discovery.files);
+
+  return graph;
 }
 
 export async function runScan(options: ScanOptions): Promise<ScanResult> {
@@ -30,17 +68,9 @@ export async function runScan(options: ScanOptions): Promise<ScanResult> {
 
   const excludePaths = options.config?.exclude_paths ?? [];
 
-  // Clear AST cache from previous scans
-  clearASTCache();
-
-  // Step 1: Discovery — walk files
-  const files = await walkDirectory(rootPath, excludePaths);
-
-  // Step 2: Detect frameworks
-  const detection = detectFrameworks(files);
-
-  // Step 3: Build agent graph (includes parsing)
-  const graph = buildAgentGraph(rootPath, files, detection);
+  // Steps 1-3: Discovery and graph building
+  const discovery = await runDiscovery(rootPath, excludePaths);
+  const graph = runGraphBuild(rootPath, discovery);
 
   // Step 4: Run analysis rules
   const findings = runAnalysis(graph, {
@@ -48,10 +78,28 @@ export async function runScan(options: ScanOptions): Promise<ScanResult> {
     onlyRules: options.rules,
     severity: options.severity,
     frameworks: options.frameworks,
+    rulesDir: options.config?.rules_dir,
   });
 
   // Step 5: Calculate score
   const score = calculateScore(findings);
+
+  // Step 6: AI analysis (optional)
+  let aiAnalysis: AIAnalysisResult | undefined;
+  if (options.aiAnalysis) {
+    try {
+      const { runAIAnalysis } = await import('./ai/analyzer.js');
+      const { getAIProvider } = await import('./ai/provider.js');
+      const provider = getAIProvider();
+      if (provider) {
+        aiAnalysis = await runAIAnalysis(findings, graph, provider);
+      } else {
+        console.error('  Warning: --ai flag set but no API key found (ANTHROPIC_API_KEY or OPENAI_API_KEY)');
+      }
+    } catch {
+      // AI analysis is purely additive; failures don't affect base results
+    }
+  }
 
   const duration = Date.now() - startTime;
 
@@ -61,5 +109,6 @@ export async function runScan(options: ScanOptions): Promise<ScanResult> {
     graph,
     duration,
     timestamp: new Date().toISOString(),
+    aiAnalysis,
   };
 }

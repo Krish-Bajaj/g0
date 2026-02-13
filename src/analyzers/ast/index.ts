@@ -24,6 +24,9 @@ export {
   extractStringValue,
   isInDangerousContext,
   canDataFlow,
+  findAllStrings,
+  findTryCatchBlocks,
+  findLoopConstructs,
 } from './queries.js';
 
 export {
@@ -34,6 +37,8 @@ export {
   getKeywordArgBool,
   getKeywordArgInt,
   getKeywordArgString,
+  findExceptHandlers,
+  findWithStatements,
 } from './python.js';
 
 export {
@@ -41,4 +46,5 @@ export {
   findRouteHandlers,
   findTemplateWithInterpolation,
   findNewExpressions,
+  findTryCatchStatements,
 } from './typescript.js';

@@ -52,6 +52,9 @@ function parseConfigFile(filePath: string): G0Config {
   if (typeof raw.include_beta === 'boolean') {
     config.include_beta = raw.include_beta;
   }
+  if (typeof raw.rules_dir === 'string') {
+    config.rules_dir = raw.rules_dir;
+  }
 
   return config;
 }

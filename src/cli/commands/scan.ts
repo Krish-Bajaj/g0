@@ -8,11 +8,12 @@ import { reportHtml } from '../../reporters/html.js';
 import { reportSarif } from '../../reporters/sarif.js';
 import { loadConfig } from '../../config/loader.js';
 import { createSpinner } from '../ui.js';
+import { isRemoteUrl, parseTarget, cloneRepo } from '../../remote/clone.js';
 import type { Severity } from '../../types/common.js';
 
 export const scanCommand = new Command('scan')
   .description('Scan an AI agent project for security issues')
-  .argument('[path]', 'Path to the agent project', '.')
+  .argument('[path]', 'Path to the agent project or remote URL', '.')
   .option('--json', 'Output as JSON')
   .option('--html [file]', 'Output as HTML report')
   .option('--sarif [file]', 'Output as SARIF 2.1.0')
@@ -23,6 +24,7 @@ export const scanCommand = new Command('scan')
   .option('--rules <ids>', 'Only run specific rules (comma-separated)')
   .option('--exclude-rules <ids>', 'Skip specific rules (comma-separated)')
   .option('--frameworks <ids>', 'Only check specific frameworks (comma-separated)')
+  .option('--ai', 'Enable AI-powered analysis (requires ANTHROPIC_API_KEY or OPENAI_API_KEY)')
   .option('--no-banner', 'Suppress the g0 banner')
   .action(async (targetPath: string, options: {
     json?: boolean;
@@ -35,13 +37,36 @@ export const scanCommand = new Command('scan')
     rules?: string;
     excludeRules?: string;
     frameworks?: string;
+    ai?: boolean;
     banner?: boolean;
   }) => {
-    const resolvedPath = path.resolve(targetPath);
+    let resolvedPath: string;
+    let cleanup: (() => void) | undefined;
 
-    if (!fs.existsSync(resolvedPath)) {
-      console.error(`Error: Path does not exist: ${resolvedPath}`);
-      process.exit(1);
+    // Handle remote URLs
+    if (isRemoteUrl(targetPath)) {
+      const target = parseTarget(targetPath);
+      const spinner = options.quiet ? null : createSpinner(`Cloning ${target.owner}/${target.repo}...`);
+      spinner?.start();
+      try {
+        const result = await cloneRepo(target);
+        resolvedPath = result.tempDir;
+        cleanup = result.cleanup;
+        spinner?.stop();
+        if (!options.quiet) {
+          console.log(`  Cloned ${target.url} to temporary directory`);
+        }
+      } catch (err) {
+        spinner?.stop();
+        console.error(`Clone failed: ${err instanceof Error ? err.message : err}`);
+        process.exit(1);
+      }
+    } else {
+      resolvedPath = path.resolve(targetPath);
+      if (!fs.existsSync(resolvedPath)) {
+        console.error(`Error: Path does not exist: ${resolvedPath}`);
+        process.exit(1);
+      }
     }
 
     // Load config
@@ -64,6 +89,7 @@ export const scanCommand = new Command('scan')
         rules: options.rules?.split(',').map(s => s.trim()),
         excludeRules: options.excludeRules?.split(',').map(s => s.trim()),
         frameworks: options.frameworks?.split(',').map(s => s.trim()),
+        aiAnalysis: options.ai,
       });
       spinner?.stop();
 
@@ -102,5 +128,7 @@ export const scanCommand = new Command('scan')
       spinner?.stop();
       console.error('Scan failed:', error instanceof Error ? error.message : error);
       process.exit(1);
+    } finally {
+      cleanup?.();
     }
   });

@@ -1,9 +1,9 @@
 // g0 Public SDK API
-export { runScan } from './pipeline.js';
-export type { ScanOptions } from './pipeline.js';
+export { runScan, runDiscovery, runGraphBuild } from './pipeline.js';
+export type { ScanOptions, DiscoveryResult } from './pipeline.js';
 export type { ScanResult, ScanScore, DomainScore } from './types/score.js';
 export type { Finding, FindingSummary } from './types/finding.js';
-export type { AgentGraph, AgentNode, ToolNode, PromptNode } from './types/agent-graph.js';
+export type { AgentGraph, AgentNode, ToolNode, PromptNode, ModelNode, VectorDBNode, FrameworkInfo } from './types/agent-graph.js';
 export type { Severity, Confidence, FrameworkId, Grade, SecurityDomain } from './types/common.js';
 export type { Rule } from './types/control.js';
 export { getAllRules, getRuleById, getRulesByDomain } from './analyzers/rules/index.js';

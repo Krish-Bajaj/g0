@@ -47,6 +47,23 @@ const MEMORY_PATTERNS = [
   /MemorySaver/,
 ];
 
+const MODEL_CONSTRUCTORS: Record<string, string> = {
+  ChatOpenAI: 'openai',
+  OpenAI: 'openai',
+  ChatAnthropic: 'anthropic',
+  Anthropic: 'anthropic',
+  BedrockChat: 'aws-bedrock',
+  ChatBedrock: 'aws-bedrock',
+  ChatOllama: 'ollama',
+  OllamaLLM: 'ollama',
+  ChatGoogleGenerativeAI: 'google',
+  ChatCohere: 'cohere',
+  ChatVertexAI: 'google',
+  AzureChatOpenAI: 'azure-openai',
+  ChatFireworks: 'fireworks',
+  ChatTogether: 'together',
+};
+
 export function parseLangChain(graph: AgentGraph, files: FileInventory): void {
   const codeFiles = [...files.python, ...files.typescript, ...files.javascript];
 
@@ -67,15 +84,79 @@ export function parseLangChain(graph: AgentGraph, files: FileInventory): void {
       : null;
 
     if (tree) {
+      extractModelsAST(tree, file.relativePath, graph);
       extractAgentsAST(tree, content, lines, file.relativePath, graph);
-      extractToolsAST(tree, lines, file.relativePath, graph);
+      extractToolsAST(tree, content, lines, file.relativePath, graph);
     } else {
+      extractModelsRegex(content, file.relativePath, graph);
       extractAgentsRegex(content, lines, file.relativePath, graph);
       extractToolsRegex(content, lines, file.relativePath, graph);
     }
 
     // Prompts use a mix of AST and regex
     extractPrompts(content, file.relativePath, lines, graph);
+  }
+
+  // Post-pass: bind tools to agents
+  bindToolsToAgents(graph);
+}
+
+function extractModelsAST(
+  tree: Tree,
+  filePath: string,
+  graph: AgentGraph,
+): void {
+  const modelPattern = new RegExp(
+    `^(${Object.keys(MODEL_CONSTRUCTORS).join('|')})$`,
+  );
+  const calls = findFunctionCalls(tree, modelPattern);
+
+  for (const call of calls) {
+    const callee = call.childForFieldName('function');
+    const constructorName = callee?.text ?? '';
+    const provider = MODEL_CONSTRUCTORS[constructorName] ?? 'unknown';
+    const line = call.startPosition.row + 1;
+
+    // Try model= or model_name= kwarg
+    const modelName =
+      getKeywordArgString(call, 'model') ??
+      getKeywordArgString(call, 'model_name') ??
+      getKeywordArgString(call, 'model_id') ??
+      undefined;
+
+    graph.models.push({
+      id: `langchain-model-${graph.models.length}`,
+      name: modelName ?? constructorName,
+      provider,
+      framework: 'langchain',
+      file: filePath,
+      line,
+    });
+  }
+}
+
+function extractModelsRegex(
+  content: string,
+  filePath: string,
+  graph: AgentGraph,
+): void {
+  for (const [constructor, provider] of Object.entries(MODEL_CONSTRUCTORS)) {
+    const pattern = new RegExp(`${constructor}\\s*\\(`, 'g');
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(content)) !== null) {
+      const line = content.substring(0, match.index).split('\n').length;
+      const region = content.substring(match.index, match.index + 500);
+      const modelMatch = region.match(/(?:model|model_name|model_id)\s*=\s*["']([^"']+)["']/);
+
+      graph.models.push({
+        id: `langchain-model-${graph.models.length}`,
+        name: modelMatch?.[1] ?? constructor,
+        provider,
+        framework: 'langchain',
+        file: filePath,
+        line,
+      });
+    }
   }
 }
 
@@ -112,16 +193,23 @@ function extractAgentsAST(
 
     const maxIterations = getKeywordArgInt(call, 'max_iterations') ?? undefined;
 
+    // Extract tools= kwarg for tool binding
+    const toolIds = extractToolIdsFromKwarg(call, lines, graph);
+
     const agentNode: AgentNode = {
       id: `langchain-agent-${graph.agents.length}`,
       name: extractAssignmentName(lines, line) || name,
       framework: 'langchain',
       file: filePath,
       line,
-      tools: [],
+      tools: toolIds,
       memoryType,
       maxIterations,
     };
+
+    // Try to link model
+    const modelId = findNearestModelId(content, line, graph);
+    if (modelId) agentNode.modelId = modelId;
 
     const systemPrompt = extractSystemPromptNear(content, call.startPosition.row);
     if (systemPrompt) {
@@ -132,8 +220,68 @@ function extractAgentsAST(
   }
 }
 
+function extractToolIdsFromKwarg(
+  call: import('../ast/parser.js').SyntaxNode,
+  lines: string[],
+  graph: AgentGraph,
+): string[] {
+  const toolsArg = getKeywordArgument(call, 'tools');
+  if (!toolsArg) return [];
+
+  // tools=[tool1, tool2, ...]  — extract identifiers from list
+  if (toolsArg.type === 'list') {
+    const names: string[] = [];
+    for (const child of toolsArg.children) {
+      if (child.type === 'identifier') {
+        names.push(child.text);
+      }
+    }
+    return matchToolNamesToIds(names, graph);
+  }
+
+  // tools=some_var — single variable reference
+  if (toolsArg.type === 'identifier') {
+    return matchToolNamesToIds([toolsArg.text], graph);
+  }
+
+  return [];
+}
+
+function matchToolNamesToIds(varNames: string[], graph: AgentGraph): string[] {
+  const ids: string[] = [];
+  for (const varName of varNames) {
+    const tool = graph.tools.find(
+      t => t.name === varName || t.id === varName,
+    );
+    if (tool) {
+      ids.push(tool.id);
+    }
+  }
+  return ids;
+}
+
+function findNearestModelId(
+  content: string,
+  agentLine: number,
+  graph: AgentGraph,
+): string | undefined {
+  // Find the model node closest to (and before) the agent line in the same file
+  let bestModel: string | undefined;
+  let bestDist = Infinity;
+
+  for (const model of graph.models) {
+    const dist = agentLine - model.line;
+    if (dist >= 0 && dist < bestDist) {
+      bestDist = dist;
+      bestModel = model.id;
+    }
+  }
+  return bestModel;
+}
+
 function extractToolsAST(
   tree: Tree,
+  content: string,
   lines: string[],
   filePath: string,
   graph: AgentGraph,
@@ -145,18 +293,35 @@ function extractToolsAST(
     const funcName = func?.childForFieldName('name')?.text;
     const line = dec.startPosition.row + 1;
 
+    // Extract docstring as description
+    let description = '';
+    const body = func?.childForFieldName('body');
+    if (body) {
+      const firstStmt = body.children[0];
+      if (firstStmt?.type === 'expression_statement') {
+        const expr = firstStmt.children[0];
+        if (expr?.type === 'string') {
+          description = expr.text.replace(/^["']{1,3}|["']{1,3}$/g, '').trim();
+        }
+      }
+    }
+
+    // Detect capabilities from function body
+    const funcText = func?.text ?? '';
+    const capabilities = detectCapabilities(funcText);
+
     graph.tools.push({
       id: `langchain-tool-${graph.tools.length}`,
       name: funcName ?? `tool_${line}`,
       framework: 'langchain',
       file: filePath,
       line,
-      description: '',
+      description,
       parameters: [],
-      hasSideEffects: false,
+      hasSideEffects: capabilities.length > 0 && !capabilities.every(c => c === 'other'),
       hasInputValidation: false,
       hasSandboxing: false,
-      capabilities: ['other'],
+      capabilities: capabilities.length > 0 ? capabilities : ['other'],
     });
   }
 
@@ -177,13 +342,16 @@ function extractToolsAST(
       const line = call.startPosition.row + 1;
       const toolName = extractAssignmentName(lines, line) || call.childForFieldName('function')?.text || `tool_${line}`;
 
+      // Extract description= kwarg if present
+      const descKwarg = getKeywordArgString(call, 'description');
+
       graph.tools.push({
         id: `langchain-tool-${graph.tools.length}`,
         name: toolName,
         framework: 'langchain',
         file: filePath,
         line,
-        description: '',
+        description: descKwarg ?? '',
         parameters: [],
         hasSideEffects: ['shell', 'code-exec', 'database', 'filesystem', 'network'].includes(type),
         hasInputValidation: type === 'class',
@@ -191,6 +359,28 @@ function extractToolsAST(
         capabilities: mapToolType(type),
       });
     }
+  }
+
+  // Find Tool() constructor calls with name= kwarg
+  const toolConstructors = findFunctionCalls(tree, /^Tool$/);
+  for (const call of toolConstructors) {
+    const line = call.startPosition.row + 1;
+    const nameKwarg = getKeywordArgString(call, 'name');
+    const descKwarg = getKeywordArgString(call, 'description');
+
+    graph.tools.push({
+      id: `langchain-tool-${graph.tools.length}`,
+      name: nameKwarg ?? extractAssignmentName(lines, line) ?? `tool_${line}`,
+      framework: 'langchain',
+      file: filePath,
+      line,
+      description: descKwarg ?? '',
+      parameters: [],
+      hasSideEffects: false,
+      hasInputValidation: false,
+      hasSandboxing: false,
+      capabilities: ['other'],
+    });
   }
 }
 
@@ -206,6 +396,10 @@ function extractAgentsRegex(
     while ((match = pattern.exec(content)) !== null) {
       const line = content.substring(0, match.index).split('\n').length;
       const memoryType = detectMemory(content);
+      const region = content.substring(match.index, match.index + 1000);
+
+      // Extract tools from regex
+      const toolIds = extractToolIdsFromRegex(region, graph);
 
       const agentNode: AgentNode = {
         id: `langchain-agent-${graph.agents.length}`,
@@ -213,10 +407,13 @@ function extractAgentsRegex(
         framework: 'langchain',
         file: filePath,
         line,
-        tools: [],
+        tools: toolIds,
         memoryType,
         maxIterations: extractMaxIterations(content, match.index),
       };
+
+      const modelId = findNearestModelId(content, line, graph);
+      if (modelId) agentNode.modelId = modelId;
 
       const systemPrompt = extractSystemPromptNear(content, match.index);
       if (systemPrompt) {
@@ -226,6 +423,18 @@ function extractAgentsRegex(
       graph.agents.push(agentNode);
     }
   }
+}
+
+function extractToolIdsFromRegex(region: string, graph: AgentGraph): string[] {
+  const toolsMatch = region.match(/tools\s*=\s*\[([^\]]*)\]/);
+  if (!toolsMatch) return [];
+
+  const varNames = toolsMatch[1]
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => /^[a-zA-Z_]\w*$/.test(s));
+
+  return matchToolNamesToIds(varNames, graph);
 }
 
 function extractToolsRegex(
@@ -240,6 +449,17 @@ function extractToolsRegex(
     while ((match = pattern.exec(content)) !== null) {
       const line = content.substring(0, match.index).split('\n').length;
       const toolName = extractToolName(lines, line, type);
+      const region = content.substring(match.index, match.index + 500);
+
+      // Extract description from docstring or kwarg
+      let description = '';
+      if (type === 'decorator') {
+        const docMatch = region.match(/"""([\s\S]*?)"""|'''([\s\S]*?)'''/);
+        description = (docMatch?.[1] ?? docMatch?.[2] ?? '').trim();
+      } else if (type === 'constructor') {
+        const descMatch = region.match(/description\s*=\s*["']([^"']+)["']/);
+        description = descMatch?.[1] ?? '';
+      }
 
       const toolNode: ToolNode = {
         id: `langchain-tool-${graph.tools.length}`,
@@ -247,7 +467,7 @@ function extractToolsRegex(
         framework: 'langchain',
         file: filePath,
         line,
-        description: '',
+        description,
         parameters: [],
         hasSideEffects: ['shell', 'code-exec', 'database', 'filesystem', 'network'].includes(type),
         hasInputValidation: type === 'class',
@@ -257,6 +477,20 @@ function extractToolsRegex(
 
       graph.tools.push(toolNode);
     }
+  }
+}
+
+function bindToolsToAgents(graph: AgentGraph): void {
+  // For agents that still have empty tool arrays, try to bind based on file proximity
+  for (const agent of graph.agents) {
+    if (agent.framework !== 'langchain') continue;
+    if (agent.tools.length > 0) continue;
+
+    // Fall back to binding all tools in the same file
+    const fileTools = graph.tools.filter(
+      t => t.framework === 'langchain' && t.file === agent.file,
+    );
+    agent.tools = fileTools.map(t => t.id);
   }
 }
 
@@ -318,6 +552,17 @@ function detectMemory(content: string): string | undefined {
     }
   }
   return undefined;
+}
+
+function detectCapabilities(body: string): ToolNode['capabilities'] {
+  const caps: ToolNode['capabilities'] = [];
+  if (/subprocess|os\.system|exec\(|child_process|spawn\(|execSync/.test(body)) caps.push('shell');
+  if (/open\(|readFile|writeFile|fs\.|pathlib|shutil/.test(body)) caps.push('filesystem');
+  if (/fetch\(|requests\.|http|urllib|axios/.test(body)) caps.push('network');
+  if (/sqlite|postgres|mysql|mongo|cursor\.|\.execute\(/.test(body)) caps.push('database');
+  if (/eval\(|exec\(|compile\(|new Function/.test(body)) caps.push('code-execution');
+  if (/smtp|sendmail|send_email/.test(body)) caps.push('email');
+  return caps;
 }
 
 function extractPrompts(

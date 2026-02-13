@@ -7,4 +7,5 @@ export interface G0Config {
   exclude_rules?: string[];
   exclude_paths?: string[];
   include_beta?: boolean;
+  rules_dir?: string;
 }

@@ -6,6 +6,9 @@ import { parseLangChain } from '../analyzers/parsers/langchain.js';
 import { parseCrewAI } from '../analyzers/parsers/crewai.js';
 import { parseMCP } from '../analyzers/parsers/mcp.js';
 import { parseOpenAI } from '../analyzers/parsers/openai.js';
+import { parseVercelAI } from '../analyzers/parsers/vercel-ai.js';
+import { parseBedrock } from '../analyzers/parsers/bedrock.js';
+import { parseAutoGen } from '../analyzers/parsers/autogen.js';
 
 export function buildAgentGraph(
   rootPath: string,
@@ -21,6 +24,10 @@ export function buildAgentGraph(
     tools: [],
     prompts: [],
     configs: [],
+    models: [],
+    vectorDBs: [],
+    frameworkVersions: [],
+    interAgentLinks: [],
     files,
   };
 
@@ -39,6 +46,15 @@ export function buildAgentGraph(
         break;
       case 'openai':
         parseOpenAI(graph, files);
+        break;
+      case 'vercel-ai':
+        parseVercelAI(graph, files);
+        break;
+      case 'bedrock':
+        parseBedrock(graph, files);
+        break;
+      case 'autogen':
+        parseAutoGen(graph, files);
         break;
     }
   }

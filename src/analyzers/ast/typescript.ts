@@ -50,6 +50,10 @@ export function findTemplateWithInterpolation(tree: Tree): SyntaxNode[] {
   });
 }
 
+export function findTryCatchStatements(tree: Tree): SyntaxNode[] {
+  return findNodes(tree, (node) => node.type === 'try_statement');
+}
+
 export function findNewExpressions(
   tree: Tree,
   className?: string | RegExp,

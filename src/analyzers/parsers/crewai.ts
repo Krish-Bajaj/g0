@@ -40,6 +40,22 @@ export function parseCrewAI(graph: AgentGraph, files: FileInventory): void {
       const goalMatch = region.match(/goal\s*=\s*["']([^"']+)["']/);
       const backstoryMatch = region.match(/backstory\s*=\s*(?:f?"""([\s\S]*?)"""|f?["']([^"']+)["'])/);
       const delegationEnabled = DELEGATION_PATTERN.test(region);
+      const llmMatch = region.match(/llm\s*=\s*["']([^"']+)["']/);
+
+      // Extract model from llm= kwarg
+      if (llmMatch) {
+        graph.models.push({
+          id: `crewai-model-${graph.models.length}`,
+          name: llmMatch[1],
+          provider: inferProvider(llmMatch[1]),
+          framework: 'crewai',
+          file: file.relativePath,
+          line,
+        });
+      }
+
+      // Extract tool references
+      const toolIds = extractToolRefsFromRegion(region, graph);
 
       const agentNode: AgentNode = {
         id: `crewai-agent-${graph.agents.length}`,
@@ -47,8 +63,9 @@ export function parseCrewAI(graph: AgentGraph, files: FileInventory): void {
         framework: 'crewai',
         file: file.relativePath,
         line,
-        tools: [],
+        tools: toolIds,
         delegationEnabled,
+        modelId: llmMatch ? `crewai-model-${graph.models.length - 1}` : undefined,
       };
 
       // Backstory is effectively the system prompt
@@ -75,6 +92,16 @@ export function parseCrewAI(graph: AgentGraph, files: FileInventory): void {
     // Extract tools
     extractCrewAITools(content, file.relativePath, lines, graph);
   }
+
+  // Post-pass: bind tools to agents that have empty tool arrays
+  for (const agent of graph.agents) {
+    if (agent.framework !== 'crewai') continue;
+    if (agent.tools.length > 0) continue;
+    const fileTools = graph.tools.filter(
+      t => t.framework === 'crewai' && t.file === agent.file,
+    );
+    agent.tools = fileTools.map(t => t.id);
+  }
 }
 
 function parseAgentsYaml(filePath: string, relativePath: string, graph: AgentGraph): void {
@@ -100,6 +127,18 @@ function parseAgentsYaml(filePath: string, relativePath: string, graph: AgentGra
     const agentConfig = config as Record<string, any>;
     const line = findKeyLine(content, name);
 
+    // Extract model from llm field in YAML
+    if (agentConfig.llm) {
+      graph.models.push({
+        id: `crewai-model-${graph.models.length}`,
+        name: String(agentConfig.llm),
+        provider: inferProvider(String(agentConfig.llm)),
+        framework: 'crewai',
+        file: relativePath,
+        line,
+      });
+    }
+
     const agentNode: AgentNode = {
       id: `crewai-agent-${graph.agents.length}`,
       name: agentConfig.role ?? name,
@@ -108,6 +147,7 @@ function parseAgentsYaml(filePath: string, relativePath: string, graph: AgentGra
       line,
       tools: [],
       delegationEnabled: agentConfig.allow_delegation === true,
+      modelId: agentConfig.llm ? `crewai-model-${graph.models.length - 1}` : undefined,
     };
 
     if (agentConfig.backstory) {
@@ -164,6 +204,33 @@ function extractCrewAITools(
       });
     }
   }
+}
+
+function extractToolRefsFromRegion(region: string, graph: AgentGraph): string[] {
+  const toolsMatch = region.match(/tools\s*=\s*\[([^\]]*)\]/);
+  if (!toolsMatch) return [];
+
+  const varNames = toolsMatch[1]
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => /^[a-zA-Z_]\w*$/.test(s));
+
+  const ids: string[] = [];
+  for (const name of varNames) {
+    const tool = graph.tools.find(t => t.name === name || t.id === name);
+    if (tool) ids.push(tool.id);
+  }
+  return ids;
+}
+
+function inferProvider(modelName: string): string {
+  const lower = modelName.toLowerCase();
+  if (lower.includes('gpt') || lower.includes('o1') || lower.includes('o3')) return 'openai';
+  if (lower.includes('claude')) return 'anthropic';
+  if (lower.includes('gemini')) return 'google';
+  if (lower.includes('llama') || lower.includes('mistral')) return 'meta/mistral';
+  if (lower.includes('bedrock')) return 'aws-bedrock';
+  return 'unknown';
 }
 
 function findKeyLine(content: string, key: string): number {

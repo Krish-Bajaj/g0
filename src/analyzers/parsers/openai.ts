@@ -29,6 +29,22 @@ export function parseOpenAI(graph: AgentGraph, files: FileInventory): void {
 
       const nameMatch = region.match(/name\s*=\s*["']([^"']+)["']/);
       const instructionsMatch = region.match(/instructions\s*=\s*(?:f?"""([\s\S]*?)"""|f?["']([^"']+)["'])/);
+      const modelMatch = region.match(/model\s*=\s*["']([^"']+)["']/);
+
+      // Extract model
+      if (modelMatch) {
+        graph.models.push({
+          id: `openai-model-${graph.models.length}`,
+          name: modelMatch[1],
+          provider: 'openai',
+          framework: 'openai',
+          file: file.relativePath,
+          line,
+        });
+      }
+
+      // Extract tool references from tools=[...]
+      const toolIds = extractToolRefsFromRegion(region, graph);
 
       const agentNode: AgentNode = {
         id: `openai-agent-${graph.agents.length}`,
@@ -36,7 +52,8 @@ export function parseOpenAI(graph: AgentGraph, files: FileInventory): void {
         framework: 'openai',
         file: file.relativePath,
         line,
-        tools: [],
+        tools: toolIds,
+        modelId: modelMatch ? `openai-model-${graph.models.length - 1}` : undefined,
       };
 
       const instructions = instructionsMatch?.[1] ?? instructionsMatch?.[2];
@@ -66,6 +83,25 @@ export function parseOpenAI(graph: AgentGraph, files: FileInventory): void {
 
       const nameMatch = region.match(/name\s*=\s*["']([^"']+)["']/);
       const instructionsMatch = region.match(/instructions\s*=\s*(?:f?"""([\s\S]*?)"""|f?["']([^"']+)["'])/);
+      const modelMatch = region.match(/model\s*=\s*["']([^"']+)["']/);
+
+      // Extract model
+      if (modelMatch) {
+        graph.models.push({
+          id: `openai-model-${graph.models.length}`,
+          name: modelMatch[1],
+          provider: 'openai',
+          framework: 'openai',
+          file: file.relativePath,
+          line,
+        });
+      }
+
+      // Extract tool references
+      const toolIds = extractToolRefsFromRegion(region, graph);
+
+      // Extract delegation targets (handoffs=[agent1, agent2])
+      const delegationTargets = extractDelegationTargets(region);
 
       const agentNode: AgentNode = {
         id: `openai-agent-${graph.agents.length}`,
@@ -73,7 +109,10 @@ export function parseOpenAI(graph: AgentGraph, files: FileInventory): void {
         framework: 'openai',
         file: file.relativePath,
         line,
-        tools: [],
+        tools: toolIds,
+        modelId: modelMatch ? `openai-model-${graph.models.length - 1}` : undefined,
+        delegationTargets: delegationTargets.length > 0 ? delegationTargets : undefined,
+        delegationEnabled: delegationTargets.length > 0,
       };
 
       const instructions = instructionsMatch?.[1] ?? instructionsMatch?.[2];
@@ -101,6 +140,7 @@ export function parseOpenAI(graph: AgentGraph, files: FileInventory): void {
       const line = content.substring(0, match.index).split('\n').length;
       const region = content.substring(match.index, match.index + 500);
       const nameMatch = region.match(/name\s*=\s*["']([^"']+)["']/);
+      const descMatch = region.match(/description\s*=\s*["']([^"']+)["']/);
       const assignMatch = lines[line - 1]?.match(/(\w+)\s*=/);
 
       graph.tools.push({
@@ -109,7 +149,7 @@ export function parseOpenAI(graph: AgentGraph, files: FileInventory): void {
         framework: 'openai',
         file: file.relativePath,
         line,
-        description: '',
+        description: descMatch?.[1] ?? '',
         parameters: [],
         hasSideEffects: false,
         hasInputValidation: /schema|parameters|strict/.test(region),
@@ -123,6 +163,23 @@ export function parseOpenAI(graph: AgentGraph, files: FileInventory): void {
     while ((match = RESPONSES_CREATE_PATTERN.exec(content)) !== null) {
       const line = content.substring(0, match.index).split('\n').length;
       const region = content.substring(match.index, match.index + 2000);
+
+      const modelMatch = region.match(/model\s*=\s*["']([^"']+)["']/);
+      if (modelMatch) {
+        const exists = graph.models.some(
+          m => m.name === modelMatch[1] && m.file === file.relativePath,
+        );
+        if (!exists) {
+          graph.models.push({
+            id: `openai-model-${graph.models.length}`,
+            name: modelMatch[1],
+            provider: 'openai',
+            framework: 'openai',
+            file: file.relativePath,
+            line,
+          });
+        }
+      }
 
       const instructionsMatch = region.match(/instructions\s*=\s*(?:f?"""([\s\S]*?)"""|f?["']([^"']+)["'])/);
       if (instructionsMatch) {
@@ -141,6 +198,43 @@ export function parseOpenAI(graph: AgentGraph, files: FileInventory): void {
       }
     }
   }
+
+  // Post-pass: bind tools to agents that have empty tool arrays
+  for (const agent of graph.agents) {
+    if (agent.framework !== 'openai') continue;
+    if (agent.tools.length > 0) continue;
+    const fileTools = graph.tools.filter(
+      t => t.framework === 'openai' && t.file === agent.file,
+    );
+    agent.tools = fileTools.map(t => t.id);
+  }
+}
+
+function extractToolRefsFromRegion(region: string, graph: AgentGraph): string[] {
+  const toolsMatch = region.match(/tools\s*=\s*\[([^\]]*)\]/);
+  if (!toolsMatch) return [];
+
+  const varNames = toolsMatch[1]
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => /^[a-zA-Z_]\w*$/.test(s));
+
+  const ids: string[] = [];
+  for (const name of varNames) {
+    const tool = graph.tools.find(t => t.name === name || t.id === name);
+    if (tool) ids.push(tool.id);
+  }
+  return ids;
+}
+
+function extractDelegationTargets(region: string): string[] {
+  const handoffsMatch = region.match(/handoffs\s*=\s*\[([^\]]*)\]/);
+  if (!handoffsMatch) return [];
+
+  return handoffsMatch[1]
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => /^[a-zA-Z_]\w*$/.test(s));
 }
 
 function assessScope(instructions: string): 'clear' | 'vague' | 'missing' {

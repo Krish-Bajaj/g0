@@ -3,6 +3,9 @@ import { detectLangChain } from './detectors/langchain.js';
 import { detectCrewAI } from './detectors/crewai.js';
 import { detectMCP } from './detectors/mcp.js';
 import { detectOpenAI } from './detectors/openai.js';
+import { detectVercelAI } from './detectors/vercel-ai.js';
+import { detectBedrock } from './detectors/bedrock.js';
+import { detectAutoGen } from './detectors/autogen.js';
 import { detectGeneric } from './detectors/generic.js';
 
 export interface DetectionResult {
@@ -25,6 +28,9 @@ const detectors: Detector[] = [
   detectCrewAI,
   detectMCP,
   detectOpenAI,
+  detectVercelAI,
+  detectBedrock,
+  detectAutoGen,
   detectGeneric,
 ];
 
