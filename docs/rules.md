@@ -1,25 +1,26 @@
 # g0 Security Rules Reference
 
-g0 ships **1,218 security rules** across **12 security domains**, combining 543 TypeScript-based rules with 675 YAML declarative rules.
+g0 ships **1,180 security rules** across **12 security domains**, combining 485 TypeScript-based rules with 695 YAML declarative rules.
 
 ## By the Numbers
 
 | Domain | TS Rules | YAML Rules | Total |
 |--------|:--------:|:----------:|:-----:|
-| Goal Integrity | 60 | 60 | **120** |
-| Tool Safety | 40 | 112 | **152** |
-| Identity & Access | 66 | 44 | **110** |
-| Supply Chain | 33 | 61 | **94** |
-| Code Execution | 60 | 32 | **92** |
-| Memory & Context | 25 | 76 | **101** |
-| Data Leakage | 60 | 69 | **129** |
-| Cascading Failures | 64 | 21 | **85** |
-| Human Oversight | 20 | 49 | **69** |
-| Inter-Agent | 30 | 62 | **92** |
-| Reliability Bounds | 40 | 45 | **85** |
-| Rogue Agent | 30 | 44 | **74** |
-| Enrichment | 15 | — | **15** |
-| **Total** | **543** | **675** | **1,218** |
+| Goal Integrity | 63 | 60 | **123** |
+| Tool Safety | 43 | 112 | **155** |
+| Identity & Access | 61 | 44 | **105** |
+| Supply Chain | 35 | 81 | **116** |
+| Code Execution | 62 | 32 | **94** |
+| Memory & Context | 28 | 76 | **104** |
+| Data Leakage | 62 | 69 | **131** |
+| Cascading Failures | 55 | 21 | **76** |
+| Human Oversight | 10 | 49 | **59** |
+| Inter-Agent | 15 | 62 | **77** |
+| Reliability Bounds | 20 | 45 | **65** |
+| Rogue Agent | 15 | 44 | **59** |
+| Enrichment | 14 | — | **14** |
+| Intelligence | 2 | — | **2** |
+| **Total** | **485** | **695** | **1,180** |
 
 > **New in v1.3.0:** 4 tool-safety rules — AA-TS-181 (excessive dangerous capabilities), AA-TS-182 (excessive unvalidated params), AA-TS-183 (overprivileged description language), AA-TS-184 (MCP server with >15 tools).
 
@@ -28,7 +29,7 @@ g0 ships **1,218 security rules** across **12 security domains**, combining 543 
 Rules are implemented in two formats:
 
 - **TypeScript rules** (`src/analyzers/rules/*.ts`) — Complex rules requiring AST analysis, multi-file correlation, or custom logic. Each domain has a dedicated file exporting a `Rule[]` array.
-- **YAML rules** (`src/rules/builtin/{domain}/*.yaml`) — Declarative rules compiled at startup via `src/rules/yaml-compiler.ts`. Support 11 check types for pattern matching, prompt analysis, and taint flow tracking.
+- **YAML rules** (`src/rules/builtin/{domain}/*.yaml`) — Declarative rules compiled at startup via `src/rules/yaml-compiler.ts`. Support 13 check types for pattern matching, prompt analysis, and taint flow tracking.
 
 ### Confidence Levels
 
@@ -114,9 +115,9 @@ Detects authentication/authorization weaknesses and credential exposure.
 
 ---
 
-### 4. Supply Chain (94 rules)
+### 4. Supply Chain (114 rules)
 
-**TS:** 33 rules | **YAML:** 61 rules
+**TS:** 33 rules | **YAML:** 81 rules
 
 Detects dependency risks, unpinned versions, model supply chain attacks, and OpenClaw skill threats.
 

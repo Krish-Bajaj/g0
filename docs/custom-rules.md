@@ -93,7 +93,7 @@ standards:
   iso42001: ["8.4"]           # Must be quoted strings
   iso23894: [R.2, R.3]
   owasp_aivss: [AIVSS-PI]
-  a2as_basic: [ISOL]
+  owasp_agentic_top10: [AAT-5]
   aiuc1: [UC-1.2]
   eu_ai_act: [Article-15]
   mitre_atlas: [AML.T0051]
@@ -116,7 +116,7 @@ Available control types: `rate-limiting`, `input-validation`, `output-sanitizati
 
 ## Check Types
 
-There are 11 check types available for YAML rules.
+There are 13 check types available for YAML rules.
 
 ### 1. `code_matches`
 

@@ -27,7 +27,7 @@ const STANDARD_NAMES: Record<string, string> = {
   'nist-ai-rmf': 'NIST AI Risk Management Framework',
   'iso23894': 'ISO 23894 AI Risk Management',
   'owasp-aivss': 'OWASP AI Verification Standard',
-  'a2as-basic': 'A2AS Basic Agentic Security',
+  'owasp-agentic-top10': 'OWASP Agentic AI Top 10',
   'soc2': 'SOC 2 Trust Criteria',
   'eu-ai-act': 'EU AI Act',
 };
@@ -43,7 +43,7 @@ const STANDARD_CONTROLS: Record<string, Array<{ id: string; name: string; domain
     { id: 'ASI07', name: 'Memory/Context Manipulation', domains: ['memory-context'] },
     { id: 'ASI08', name: 'Cascading Failures', domains: ['cascading-failures'] },
     { id: 'ASI09', name: 'Improper Session Handling', domains: ['memory-context', 'identity-access'] },
-    { id: 'ASI10', name: 'Excessive Autonomy', domains: ['goal-integrity', 'tool-safety'] },
+    { id: 'ASI10', name: 'Excessive Autonomy', domains: ['goal-integrity', 'tool-safety', 'human-oversight', 'rogue-agent'] },
   ],
   'aiuc1': [
     { id: 'A001', name: 'Agent Identity', domains: ['identity-access'] },
@@ -57,7 +57,7 @@ const STANDARD_CONTROLS: Record<string, Array<{ id: string; name: string; domain
     { id: 'E001', name: 'Prompt Hardening', domains: ['goal-integrity'] },
     { id: 'E002', name: 'Injection Prevention', domains: ['goal-integrity', 'code-execution'] },
     { id: 'F001', name: 'Supply Chain Verification', domains: ['supply-chain'] },
-    { id: 'F002', name: 'Quarterly Security Testing', domains: ['goal-integrity', 'tool-safety', 'identity-access', 'supply-chain', 'code-execution', 'memory-context', 'data-leakage', 'cascading-failures'] },
+    { id: 'F002', name: 'Quarterly Security Testing', domains: ['goal-integrity', 'tool-safety', 'identity-access', 'supply-chain', 'code-execution', 'memory-context', 'data-leakage', 'cascading-failures', 'human-oversight', 'inter-agent', 'reliability-bounds', 'rogue-agent'] },
   ],
   'nist-ai-rmf': [
     { id: 'GOVERN-1', name: 'AI Risk Policies', domains: ['goal-integrity', 'tool-safety', 'identity-access'] },
@@ -68,7 +68,8 @@ const STANDARD_CONTROLS: Record<string, Array<{ id: string; name: string; domain
     { id: 'MANAGE-1', name: 'Risk Treatment', domains: ['goal-integrity', 'tool-safety', 'identity-access'] },
     { id: 'MANAGE-2', name: 'Deploy Monitoring', domains: ['cascading-failures', 'memory-context'] },
     { id: 'MANAGE-3', name: 'Incident Response', domains: ['cascading-failures'] },
-    { id: 'MANAGE-4', name: 'Third Party Risk', domains: ['supply-chain'] },
+    { id: 'MANAGE-4', name: 'Third Party Risk', domains: ['supply-chain', 'inter-agent'] },
+    { id: 'MANAGE-5', name: 'Reliability & Bounds', domains: ['reliability-bounds'] },
   ],
   'iso42001': [
     { id: 'A.5.1', name: 'AI Policy', domains: ['goal-integrity', 'tool-safety', 'identity-access'] },
@@ -99,6 +100,7 @@ const STANDARD_CONTROLS: Record<string, Array<{ id: string; name: string; domain
     { id: 'Art.10.3', name: 'Data Governance', domains: ['data-leakage', 'identity-access'] },
     { id: 'Art.15.1', name: 'Accuracy', domains: ['goal-integrity'] },
     { id: 'Art.15.2', name: 'Resilience', domains: ['cascading-failures', 'code-execution'] },
+    { id: 'Art.14.1', name: 'Human Oversight', domains: ['human-oversight'] },
     { id: 'Art.15.3', name: 'Cybersecurity', domains: ['identity-access', 'supply-chain'] },
   ],
   'iso23894': [
@@ -119,15 +121,17 @@ const STANDARD_CONTROLS: Record<string, Array<{ id: string; name: string; domain
     { id: 'L3.1', name: 'Advanced Threat Protection', domains: ['goal-integrity', 'cascading-failures'] },
     { id: 'L3.2', name: 'Supply Chain Security', domains: ['supply-chain'] },
   ],
-  'a2as-basic': [
-    { id: 'AUTH-01', name: 'Agent Authentication', domains: ['identity-access'] },
-    { id: 'AUTH-02', name: 'Authorization Boundaries', domains: ['identity-access', 'tool-safety'] },
-    { id: 'DATA-01', name: 'Data Handling', domains: ['data-leakage'] },
-    { id: 'DATA-02', name: 'Context Isolation', domains: ['memory-context'] },
-    { id: 'EXEC-01', name: 'Safe Execution', domains: ['code-execution'] },
-    { id: 'EXEC-02', name: 'Input Sanitization', domains: ['goal-integrity', 'code-execution'] },
-    { id: 'CHAIN-01', name: 'Dependency Security', domains: ['supply-chain'] },
-    { id: 'MON-01', name: 'Operational Monitoring', domains: ['cascading-failures'] },
+  'owasp-agentic-top10': [
+    { id: 'AAT-1', name: 'Agent Authorization Hijacking', domains: ['identity-access', 'tool-safety'] },
+    { id: 'AAT-2', name: 'Agent Untraceability', domains: ['rogue-agent'] },
+    { id: 'AAT-3', name: 'Agent Critical Systems Interaction', domains: ['code-execution', 'tool-safety'] },
+    { id: 'AAT-4', name: 'Agent Alignment Faking', domains: ['reliability-bounds', 'rogue-agent'] },
+    { id: 'AAT-5', name: 'Agent Goal Manipulation', domains: ['goal-integrity'] },
+    { id: 'AAT-6', name: 'Agent Impact Chain / Blast Radius', domains: ['data-leakage', 'cascading-failures'] },
+    { id: 'AAT-7', name: 'Agent Memory/Context Manipulation', domains: ['memory-context'] },
+    { id: 'AAT-8', name: 'Multi-Agent Exploitation', domains: ['inter-agent'] },
+    { id: 'AAT-9', name: 'Agent Supply Chain / Dependency Attacks', domains: ['supply-chain'] },
+    { id: 'AAT-10', name: 'Agent Checker Out of Loop', domains: ['human-oversight'] },
   ],
 };
 
