@@ -472,6 +472,73 @@ describe('NotificationManager', () => {
     });
   });
 
+  // ── plugin event data in digests ─────────────────────────────────────
+
+  describe('plugin event summarization', () => {
+    it('includes patterns and phase from injection events', async () => {
+      const nm = new NotificationManager({
+        alertConfig: baseConfig,
+        logger: mockLogger,
+        mode: 'interval',
+      });
+
+      nm.recordEvent(makeEvent({
+        type: 'injection.detected',
+        agentId: 'avnish',
+        data: {
+          patterns: ['ignore\\s+previous\\s+instructions'],
+          severity: 'high',
+          phase: 'llm_input',
+          model: 'claude-sonnet-4-6',
+        },
+      }));
+
+      await nm.flush();
+      const body = JSON.stringify(mockPostWithRetry.mock.calls[0][1]);
+      expect(body).toContain('llm_input');
+      expect(body).toContain('ignore');
+      nm.stop();
+    });
+
+    it('includes toolName from tool.blocked events', async () => {
+      const nm = new NotificationManager({
+        alertConfig: baseConfig,
+        logger: mockLogger,
+        mode: 'interval',
+      });
+
+      nm.recordEvent(makeEvent({
+        type: 'tool.blocked',
+        agentId: 'krish',
+        data: { toolName: 'bash', reason: 'blocked list' },
+      }));
+
+      await nm.flush();
+      const body = JSON.stringify(mockPostWithRetry.mock.calls[0][1]);
+      expect(body).toContain('bash');
+      expect(body).toContain('blocked list');
+      nm.stop();
+    });
+
+    it('falls back to event type when no data fields present', async () => {
+      const nm = new NotificationManager({
+        alertConfig: baseConfig,
+        logger: mockLogger,
+        mode: 'interval',
+      });
+
+      nm.recordEvent(makeEvent({
+        type: 'pii.redacted',
+        data: {},
+      }));
+
+      await nm.flush();
+      const body = JSON.stringify(mockPostWithRetry.mock.calls[0][1]);
+      expect(body).toContain('pii.redacted');
+      nm.stop();
+    });
+  });
+
   // ── no webhookUrl ──────────────────────────────────────────────────────
 
   describe('no webhookUrl', () => {
