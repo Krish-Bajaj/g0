@@ -520,6 +520,33 @@ describe('NotificationManager', () => {
       nm.stop();
     });
 
+    it('truncates summarized event to 120 chars', async () => {
+      const nm = new NotificationManager({
+        alertConfig: { ...baseConfig, format: 'generic' },
+        logger: mockLogger,
+        mode: 'interval',
+      });
+
+      nm.recordEvent(makeEvent({
+        type: 'injection.detected',
+        data: {
+          phase: 'llm_input',
+          toolName: 'very_long_tool_name_that_keeps_going',
+          patterns: ['pattern_one_is_quite_long', 'pattern_two_is_also_long', 'pattern_three_long'],
+          detail: 'This is a very long detail string that adds even more characters to push past the limit',
+          reason: 'Extra reason text that should cause truncation of the summary',
+          model: 'claude-sonnet-4-6-with-extra-long-model-name',
+        },
+      }));
+
+      await nm.flush();
+      const body = mockPostWithRetry.mock.calls[0][1] as any;
+      const sample: string = body.categories.injection.samples[0];
+      expect(sample.length).toBeLessThanOrEqual(120);
+      expect(sample).toMatch(/\.\.\.$/);
+      nm.stop();
+    });
+
     it('falls back to event type when no data fields present', async () => {
       const nm = new NotificationManager({
         alertConfig: baseConfig,

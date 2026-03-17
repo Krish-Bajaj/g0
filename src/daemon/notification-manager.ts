@@ -435,9 +435,8 @@ function summarizeEvent(event: ReceivedEvent): string {
 
   if (event.data?.phase) parts.push(`[${event.data.phase}]`);
   if (event.data?.toolName) parts.push(event.data.toolName as string);
-  if (event.data?.patterns) {
-    const p = event.data.patterns as string[];
-    parts.push(`matched: ${p.join(', ')}`);
+  if (event.data?.patterns && Array.isArray(event.data.patterns) && event.data.patterns.length > 0) {
+    parts.push(`matched: ${(event.data.patterns as string[]).join(', ')}`);
   }
   if (event.data?.detail) parts.push(event.data.detail as string);
   if (event.data?.reason) parts.push(event.data.reason as string);
