@@ -93,6 +93,14 @@ export class NotificationManager {
     this.mode = opts.mode;
     this.suppressedEventTypes = new Set(opts.suppressEventTypes ?? []);
     this.rateLimitMs = (opts.rateLimitSeconds ?? 60) * 1000;
+
+    // Warn about unknown event types in suppressEventTypes
+    const knownTypes = Object.keys(SECURITY_EVENT_TYPES);
+    for (const eventType of this.suppressedEventTypes) {
+      if (!knownTypes.includes(eventType)) {
+        this.logger.warn(`suppressEventTypes: unknown event type "${eventType}" (known types: ${knownTypes.join(', ')})`);
+      }
+    }
     this.lastFlushTimestamp = new Date().toISOString();
 
     if (this.mode === 'interval') {
