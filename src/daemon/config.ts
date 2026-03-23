@@ -44,6 +44,9 @@ export interface DaemonConfig {
     dockerDaemonConfigPath?: string;
     /** Fast egress scan interval in seconds (default: 60). Set 0 to disable. */
     egressIntervalSeconds?: number;
+    /** Regex to extract agentId from container name. First capture group = agentId.
+     *  Default: `-agent-([^-]+)-` (matches OpenClaw sandbox naming: {prefix}-agent-{id}-{hash}) */
+    containerAgentPattern?: string;
   };
   /** Webhook alerting configuration */
   alerting?: {

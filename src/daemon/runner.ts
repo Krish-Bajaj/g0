@@ -785,13 +785,18 @@ async function runFastEgressCheck(): Promise<void> {
     // Route egress violations through NotificationManager for batching/rate-limiting
     // instead of firing immediate webhook alerts (prevents alert spam)
     if (notificationManager) {
+      const agentPattern = config.openclaw?.containerAgentPattern
+        ? new RegExp(config.openclaw.containerAgentPattern)
+        : /-agent-([^-]+)-/;
       for (const v of result.violations) {
         const dest = v.connection.remoteHost || v.connection.remote;
         const container = v.connection.container ?? undefined;
+        const agentId = container ? agentPattern.exec(container)?.[1] : undefined;
         notificationManager.recordEvent({
           source: 'custom',
           type: 'egress.violation',
           timestamp: new Date().toISOString(),
+          agentId,
           data: {
             reason: v.reason,
             remote: dest,

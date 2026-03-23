@@ -445,6 +445,7 @@ export class NotificationManager {
 
 function summarizeEvent(event: ReceivedEvent): string {
   // Plugin injection/PII events send { patterns, phase, severity, toolName? }
+  // Egress events send { reason, remote, container }
   // Build a human-readable summary from whatever fields are available
   const parts: string[] = [];
 
@@ -458,7 +459,7 @@ function summarizeEvent(event: ReceivedEvent): string {
   if (event.data?.model) parts.push(`model: ${event.data.model}`);
 
   const detail = parts.length > 0 ? parts.join(' — ') : event.type;
-  return detail.length > 120 ? detail.slice(0, 117) + '...' : detail;
+  return detail.length > 200 ? detail.slice(0, 197) + '...' : detail;
 }
 
 function formatTime(iso: string): string {
